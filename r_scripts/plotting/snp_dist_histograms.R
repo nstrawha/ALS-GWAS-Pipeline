@@ -11,6 +11,8 @@ rm(list = ls())
 library(here)
 library(tidyverse)
 library(data.table)
+library("BSgenome.Hsapiens.UCSC.hg38")
+source(here("r_scripts", "analysis", "peak_calling_functions.R"))
 
 main <- function() {
   
@@ -19,169 +21,148 @@ main <- function() {
   # set params
   num_chromosomes <- 22
   
-  functions_list <- c(
-    "intron", 
-    "exon", 
-    "cds", # remove; already present in exons
-    "promoter", 
-    "terminator", 
-    "utr3", # remove; already present in exons
-    "utr5", # remove; already present in exons
-    "unannotated"
-  )
-  
   class_types <- c(
+    "all",
     "m6a_lof",
     "m5c_lof", 
-    "m6a_gof", 
-    "other"
+    "m6a_gof"
   )
   
-  # get col names from small dataset
-  dummy <- fread(file = here(
-    "summary_statistics_categorized", 
-    "m6a_lof", 
-    "utr5",
-    "als.sumstats.lmm.chr22.utr5.m6a_lof.txt"
-  ))
+  bin_size <- 1e5
   
-  cnames <- colnames(dummy)
+  # build idx list of chromosome start pos
+  genome <- BSgenome.Hsapiens.UCSC.hg38
+  chrom_names <- paste0("chr", 1:num_chromosomes)
+  chrom_lengths <- seqlengths(genome)[chrom_names]
+  chrom_starts <- c(0, cumsum(as.numeric(chrom_lengths[-length(chrom_lengths)])))
+  names(chrom_starts) <- 1:num_chromosomes
   
-  # initialize named lists and sublists of dfs to store data for rcircos plot
-  data_dfs_store <- setNames(
-    lapply(class_types, function(class) {
-      setNames(
-        lapply(functions_list, function(func) {
-          df <- data.frame(matrix(ncol = length(cnames), nrow = 0))
-          colnames(df) <- cnames
-          return(df)
-        }),
-        functions_list
-      )
-    }),
-    class_types
-  )
+  # read files with bins
+  data_store <- list()
   
-  # iterate through mutation categories
-  for (class in class_types) {
-    current_class_dfs <- data_dfs_store[[class]]
+  for (chrom_idx in 1:num_chromosomes) {
+    fdata <- fread(file = here(
+      "binned_data", 
+      paste0("binned_counts_chr", chrom_idx, ".txt")
+      ))
     
-    # iterate through functional regions
-    for (func in functions_list) {
-      current_func_dfs <- current_class_dfs[[func]]
+    data_store[[chrom_idx]] <- fdata
+  }
+  
+  data_store <- rbindlist(data_store)
+  
+  # correct for chr starts
+  data_store[, `:=`(
+    bin_start = as.numeric(bin_start),
+    bin_end   = as.numeric(bin_end),
+    bin_mid   = as.numeric(bin_mid)
+  )]
+  
+  data_df_als <- data_store[data_store$data_type == "als", ]
+  data_df_control <- data_store[data_store$data_type == "control", ]
+  
+  message("Data read and formatted")
+  
+  # read significant bins results
+  significant_bins <- list()
+  append_idx <- 1
+  
+  for (mut in class_types) {
+    for (chrom_idx in 1:num_chromosomes) {
+      current_df <- fread(file = here(
+        "significant_bins", 
+        mut, 
+        paste0("significant_peaks_chr", chrom_idx, "_", mut, ".txt")
+        ))
       
-      floc <- here("summary_statistics_categorized", class, func)
-      
-      # iterate through chromosomes
-      for (chrom_idx in 1:num_chromosomes) {
-        
-        message("Counting chr ", chrom_idx, " for ", class, " ", func, "s")
-        
-        # get data categorized by mutation class and functional region
-        faddress <- here(floc, paste0("als.sumstats.lmm.chr", chrom_idx, ".", func, ".", class, ".txt"))
-        fdata <- fread(file = faddress)
-        
-        # record df
-        current_func_dfs <- rbind(current_func_dfs, fdata)
-      }
-      
-      current_class_dfs[[func]] <- current_func_dfs
+      significant_bins[[append_idx]] <- current_df
+      append_idx <- append_idx + 1
     }
-    
-    data_dfs_store[[class]] <- current_class_dfs
   }
   
-  new_class_types <- c(
-    "m6A LOF",
-    "m5C LOF", 
-    "m6A GOF", 
-    "All SNPs"
-  )
+  significant_bins <- rbindlist(significant_bins)
   
-  # unlist and load data to plot as large dfs for each mutation class
-  data_dfs_store <- lapply(data_dfs_store, function(dfs) rbindlist(dfs))
+  # mark which rows are significant once
+  setkey(data_df_als, chr, bin_start, mut_class)
+  setkey(significant_bins, chr, bin_start, mut_class)
   
-  # replace other mutation category with all mutations
-  all_snps_df <- rbindlist(data_dfs_store)
-  colnames(all_snps_df) <- cnames
-  data_dfs_store[["other"]] <- all_snps_df
-  data_dfs_store <- setNames(data_dfs_store, new_class_types)
-
-  # remove dups
-  data_dfs_store <- lapply(data_dfs_store, function(df) {
-    df %>%
-      distinct(snp, .keep_all = TRUE)
-  })
+  # ensure bin_start numeric for join
+  data_df_als[, bin_start := as.numeric(bin_start)]
+  significant_bins[, bin_start := as.numeric(bin_start)]
   
-  bin_size <- 1e4
-  binned_all_classes <- list()
+  # shift bins
+  data_df_als[, bin_start_shifted := bin_start + chrom_starts[as.character(chr)]]
+  significant_bins[, bin_start_shifted := bin_start + chrom_starts[as.character(chr)]]
+  data_df_control[, bin_start_shifted := bin_start + chrom_starts[as.character(chr)]]
   
-  # bin snps
-  for (class in new_class_types) {
-    current_mat <- data_dfs_store[[class]]
+  # find significant bins
+  data_df_als[, significant := !is.na(
+    significant_bins[data_df_als, 
+                     on = .(bin_start_shifted, mut_class), 
+                     which = TRUE]
+  )]
+  
+  x_breaks <- chrom_starts
+  x_labels <- paste0("chr", names(chrom_starts))
+  
+  for (class in class_types) {
+    current_df_als <- data_df_als[mut_class == class, ]
     
-    snp_data <- data.frame(
-      chr = current_mat$chr,
-      bp = current_mat$bp
+    als_snp_chromwide_hists <- ggplot(current_df_als, aes(x = bin_start_shifted, y = count, fill = interaction(mut_class, significant))) +
+      geom_col(width = bin_size * 0.95, position = position_identity()) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+      scale_x_continuous(breaks = x_breaks, labels = x_labels, expand = expansion(mult = c(0, 0))) +
+      labs(
+        x = "Genomic Position",
+        y = "SNP Frequency",
+        title = paste("ALS Genome-Wide SNP Distribution for", class)
+      ) +
+      theme(
+        axis.text.x = element_text(size = 8, angle = 90, vjust = 0.5, hjust = 1),  # vertical labels
+        axis.text.y = element_text(size = 8),
+        panel.spacing = unit(0.6, "lines")
+      ) +
+      scale_fill_manual(values = setNames(
+        c("black", "red"),
+        c(paste0(class, ".FALSE"), paste0(class, ".TRUE"))
+      ))
+    
+    ggsave(
+      filename = here("outputs", paste0("als_chr_dists_histogram_", class, ".png")), 
+      plot = als_snp_chromwide_hists, 
+      width = 16, height = 6
     )
-    
-    snp_data$bin_start <- as.integer(floor(snp_data$bp / bin_size) * bin_size)
-    snp_data$bin_end <- as.integer(snp_data$bin_start + bin_size)
-    
-    total_snps <- nrow(snp_data)
-    
-    binned_counts <- snp_data %>%
-      group_by(chr, bin_start, bin_end) %>%
-      summarise(count = n(), .groups = "drop") %>%
-      mutate(
-        rel_freq = count / total_snps,
-        mut_class = class,
-        bin_mid = bin_start + bin_size / 2
-      )
-    
-    binned_all_classes[[class]] <- binned_counts
   }
   
-  # combine into single dataframe
-  df_binned_plot <- bind_rows(binned_all_classes)
-  
-  # create plot
-  snp_chromwide_hists <- ggplot(df_binned_plot, aes(x = bin_mid, y = count, fill = mut_class)) +
+  # create plots of control snps
+  control_snp_chromwide_hists <- ggplot(data_df_control, aes(x = bin_start_shifted, y = count, fill = mut_class)) +
     geom_col(width = bin_size * 0.95) +
-    scale_y_continuous(
-      expand = expansion(mult = c(0, 0.05))) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    scale_x_continuous(breaks = x_breaks, labels = x_labels, expand = expansion(mult = c(0, 0))) +
     facet_grid(rows = vars(mut_class), scales = "free_y") +
     labs(
       x = "Genomic Position",
       y = "SNP Frequency",
-      title = "Genome-Wide SNP Distribution by Mutation Category"
+      title = "Control Genome-Wide SNP Distribution by Mutation Category"
     ) +
     theme(
       strip.text.y = element_text(angle = 0, hjust = 0),
       panel.spacing = unit(0.6, "lines"),
-      axis.text.x = element_text(size = 8),
+      axis.text.x = element_text(size = 8, angle = 90, vjust = 0.5, hjust = 1),
       axis.text.y = element_text(size = 8)
     ) + 
     scale_fill_manual(values = c(
-      "m6A LOF" = "red",
-      "m6A GOF" = "darkgreen",
-      "m5C LOF" = "blue",
-      "All SNPs" = "black"
+      "m6a_lof" = "red",
+      "m6a_gof" = "darkgreen",
+      "m5c_lof" = "blue",
+      "all" = "black"
     ))
   
-  ggsave(
-    filename = here("outputs", "chr_dists_histogram.png"), 
-    plot = snp_chromwide_hists, 
-    width = 16, height = 4
-  )
   
-  # write data for future analysis
-  fwrite(
-    df_binned_plot, 
-    file = here("binned_data.txt"), 
-    sep = "\t", 
-    col.names = TRUE, 
-    quote = FALSE
+  ggsave(
+    filename = here("outputs", "control_chr_dists_histogram.png"), 
+    plot = control_snp_chromwide_hists, 
+    width = 16, height = 6
   )
   
   invisible(NULL)

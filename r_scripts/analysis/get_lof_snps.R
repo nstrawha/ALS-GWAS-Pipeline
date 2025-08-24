@@ -62,7 +62,7 @@ main <- function() {
   for (func in functions_list) {
     
     # iterate through chroms
-    for (chrom_idx in 1:num_chromosomes) {
+    for (chrom_idx in 3:num_chromosomes) {
       
       message("Categorizing ", func, "s for chr ", chrom_idx, "; LOFs")
       

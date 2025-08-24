@@ -57,6 +57,9 @@ M6A_LOF_DIR="m6a_lof"                                       # .
 M6A_GOF_DIR="m6a_gof"                                       # .
 M5C_LOF_DIR="m5c_lof"                                       # .
 OTH_MUTS_DIR="other"                                        # .
+ALL_MUTS_DIR="all"                                          # .
+BIN_DIR="binned_data"                                       # .
+SIG_BIN_DIR="significant_bins"                              # .
 
 # package certain folders for later iteration
 DUP_DIRS=(
@@ -92,7 +95,7 @@ clean_up() {
     if [[ "$KEEP_OUTPUTS" = true ]]; then
         for dir in */; do
             dirname="${dir%/}"
-            if [[ "$dirname" != "$OUT_DIR" && "$dirname" != "$SCRIPT_DIR" && "$dirname" != "$DATA_DIR" && "$dirname" != "$CAT_DIR" ]]; then
+            if [[ "$dirname" != "$OUT_DIR" && "$dirname" != "$SCRIPT_DIR" && "$dirname" != "$DATA_DIR" && "$dirname" != "$CAT_DIR" && "$dirname" != "$BIN_DIR" && "$dirname" != "$SIG_BIN_DIR" ]]; then
             echo "Removing $dirname..."
             rm -rf "$dirname"
             fi
@@ -200,6 +203,21 @@ main () {
     echo "Creating barplot..."
     Rscript "${SCRIPT_DIR}/${PLT_DIR}/mutation_classes_by_function.R"
 
+    CAT_DIRS=(
+    $M6A_LOF_DIR
+    $M6A_GOF_DIR
+    $M5C_LOF_DIR
+    $ALL_MUTS_DIR
+    )
+
+    # find highest confidence peaks
+    echo "Finding high-confidence peaks..."
+    for CDIR in "${CAT_DIRS[@]}"; do
+        mkdir -p "${BIN_DIR}/${CDIR}"
+        mkdir -p "${SIG_BIN_DIR}/${CDIR}"
+    done
+    Rscript "${SCRIPT_DIR}/${ANA_DIR}/find_ALS_peaks.R"
+
     # make rcircos plot
     echo "Creating RCircos plot..."
     Rscript "${SCRIPT_DIR}/${PLT_DIR}/rcircos_histogram.R"
@@ -208,13 +226,8 @@ main () {
     echo "Creating linear histograms..."
     Rscript "${SCRIPT_DIR}/${PLT_DIR}/snp_dist_histograms.R"
 
-    # find highest confidence peaks
-    echo "Finding high-confidence peaks..."
-    Rscript "${SCRIPT_DIR}/${ANA_DIR}/find_ALS_peaks.R"
-
     # clean all folders except outputs/
     clean_up true
-    rm binned_data.txt # TODO: check if needed downstream
     rm -f .here
 
     echo "Script finished. Outputs written in ${OUT_DIR}/."
