@@ -1,4 +1,4 @@
-### ALS GWAS m6A/m5C Analysis Pipeline
+# ALS GWAS m6A/m5C Analysis Pipeline
 
 The pipeline presented here is intended to identify high-confidence m6A loss of function, m6A gain of function, and m5C loss of function SNPs based on data from Project MinE, the University of Massachusetts, and AnswerALS, as well as a control SNP distribution. The pipeline may be run to completion with the Bash script run_pipeline.sh.
 
@@ -26,11 +26,11 @@ The full pipeline may be run with ```bash run_pipeline.sh``` in Linux. All direc
 
 R Scripts are divided into four subfolders of r_scripts/: aggregation/, formatting/, analysis/, and plotting/.
 
-# Aggregation
+### Aggregation
 
 R Scripts in this folder are intended to combine SNP data from Project MinE, the University of Massachusetts, and AnswerALS in a consistent format.
 
-# Formatting
+### Formatting
 
 R Scripts in this folder are intended to manipulate the data in some way prior to analysis. 
 
@@ -40,7 +40,7 @@ R Scripts in this folder are intended to manipulate the data in some way prior t
 
 [`find_duplicate_snps.R`](formatting/find_duplicate_snps.R) filters for SNPs that are present in two or more datasets, averaging effect size, standard error, and p-value between them. 
 
-# Analysis
+### Analysis
 
 R Scripts in this folder expand on the SNP info presented in the original data and draw conclusions.
 
