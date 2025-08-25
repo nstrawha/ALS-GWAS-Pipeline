@@ -50,7 +50,21 @@ main <- function() {
     )
     
     # find duplicate and unique snps
-    dup_snps <- lapply(datas_orig, function(df) df[bp %in% df[duplicated(bp) | duplicated(bp, fromLast = TRUE), bp]])
+    dup_snps <- lapply(datas_orig, function(df) {
+      
+      # keep only duplicate snps
+      dups <- df[snp %in% df[duplicated(snp) | duplicated(snp, fromLast = TRUE), snp]]
+      
+      # collapse duplicates by averaging b, se, and p
+      dups_avg <- dups[, .(
+        bp      = unique(bp)[1],          # bp should be same, but keep unique
+        b       = mean(b, na.rm = TRUE),  # average effect sizes
+        se      = mean(se, na.rm = TRUE), # same for SE
+        p       = mean(p, na.rm = TRUE)   # same for p
+      ), by = snp]
+      
+      return(dups_avg)
+    })
     
     dup_bps <- lapply(dup_snps, function(df) df$bp)
     
@@ -71,7 +85,8 @@ main <- function() {
     all_snps <- setNames(all_snps, data_types)
     
     # remove all umass data
-    all_snps <- lapply(all_snps, function(snps) snps[orig != "umass"])
+    all_snps <- lapply(all_snps, function(snps) snps[orig != "umass"]) # remove umass snps
+    all_snps <- lapply(all_snps, function(snps) snps[orig != "answerALS"]) # remove answerALS snps
     all_snps <- lapply(all_snps, function(snps) snps[, orig := NULL])
     all_snps <- setNames(all_snps, data_types )
     

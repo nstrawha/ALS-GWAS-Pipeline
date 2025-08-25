@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# find_snps_in_peaks.R
+# find_high_conf_snps.R
 # Code by Noah Strawhacker
 # Aug. 2025
 # Script to call out relevant ALS SNPs within significant peaks

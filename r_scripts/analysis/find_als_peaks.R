@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# find_ALS_peaks.R
+# find_als_peaks.R
 # Code by Noah Strawhacker
 # Aug. 2025
 # Script to identify ALS peaks using a control distribution

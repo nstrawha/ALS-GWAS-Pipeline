@@ -4,7 +4,7 @@ set -euo pipefail
 # -------------------------
 # Description
 # -------------------------
-# Pipeline to filter and analyze ALS SNP data (Project MinE & UMass)
+# Pipeline to FORMer and analyze ALS SNP data (Project MinE & UMass)
 # Author: Noah Strawhacker
 # Date: Jul. 2025
 # Version: 1.0
@@ -28,7 +28,7 @@ touch .here
 
 SCRIPT_DIR="r_scripts"                                      # Original
 AGG_DIR="aggregation"                                       # .
-FILT_DIR="filtering"                                        # .
+FORM_DIR="formatting"                                       # .
 ANA_DIR="analysis"                                          # .
 PLT_DIR="plotting"                                          # .
 DATA_DIR="original_data"                                    # . 
@@ -134,7 +134,7 @@ main () {
     # convert files to BED for later realignment
     echo "Converting to BED for realignment..."
     mkdir -p "$BED_HG19_DIR"
-    Rscript "${SCRIPT_DIR}/${FILT_DIR}/lmm_to_bed_convert.R"
+    Rscript "${SCRIPT_DIR}/${FORM_DIR}/lmm_to_bed_convert.R"
 
     # realign files to hg38
     echo "Realigning BED files..."
@@ -152,7 +152,7 @@ main () {
     echo "Data realigned. Converting back to LMM..."
     mkdir -p "$LMM_HG38_DIR"
     mkdir -p "$LMM_HG19_DIR"
-    Rscript "${SCRIPT_DIR}/${FILT_DIR}/bed_to_lmm_convert.R"
+    Rscript "${SCRIPT_DIR}/${FORM_DIR}/bed_to_lmm_convert.R"
 
     echo "Data realigned and formatted"
 
@@ -166,7 +166,7 @@ main () {
     for DIR in "${DUP_DIRS[@]}"; do
         mkdir -p "$DIR"
     done
-    Rscript "${SCRIPT_DIR}/${FILT_DIR}/find_duplicate_snps.R"
+    Rscript "${SCRIPT_DIR}/${FORM_DIR}/find_duplicate_snps.R"
 
     # remove intermediates
     rm -r "$LMM_HG38_DIR"
