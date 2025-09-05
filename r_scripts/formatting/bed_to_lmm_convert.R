@@ -16,9 +16,7 @@ load_bed_data <- function(floc, fname, unmap) {
   faddress <- here(floc, fname)
   bed_data <- fread(faddress)
   
-  if (unmap) {
-    bed_data$V5 = NULL
-  }
+  if (unmap) bed_data$V5 = NULL
   
   colnames(bed_data) <- c("chrom", "start", "end", "snp")
   
@@ -33,7 +31,7 @@ write_lmm_data <- function(lmm, bed, mapped_indices, hg_ver, idx, floc) {
     data_to_write <- lmm[mapped_indices, ]
     
   } else if (hg_ver == 19) {
-    data_to_write <- lmm[-mapped_indices, , ]
+    data_to_write <- lmm[-mapped_indices, ]
     
   }
   
@@ -91,9 +89,9 @@ main <- function() {
     faddress_lmm <- here(floc_old_lmm, fname_lmm)
     lmm_data <- fread(faddress_lmm)
     
-    # find which snips were successfully mapped
-    mapped_snips <- bed_data_hg38$snp
-    row_indices_hg38 <- match(mapped_snips, lmm_data$snp)
+    # find which snps were successfully mapped
+    mapped_snps <- bed_data_hg38$snp
+    row_indices_hg38 <- match(mapped_snps, lmm_data$snp)
     
     # organize and write output files
     write_lmm_data(

@@ -4,7 +4,7 @@ set -euo pipefail
 # -------------------------
 # Description
 # -------------------------
-# Pipeline to FORMer and analyze ALS SNP data (Project MinE & UMass)
+# Pipeline to format and analyze ALS SNP data (Project MinE, UMass, AnswerALS)
 # Author: Noah Strawhacker
 # Date: Jul. 2025
 # Version: 1.0
@@ -60,6 +60,10 @@ OTH_MUTS_DIR="other"                                        # .
 ALL_MUTS_DIR="all"                                          # .
 BIN_DIR="binned_data"                                       # .
 SIG_BIN_DIR="significant_bins"                              # .
+SIG_SNP_DIR="significant_snps"                              # .
+INFSUM_DIR="info_summary"                                   # .
+INF_DIR="pheno_or_clinsig_info"                             # .
+NOINF_DIR="no_info"                                         # .
 
 # package certain folders for later iteration
 DUP_DIRS=(
@@ -87,6 +91,12 @@ CAT_DIRS=(
     $OTH_MUTS_DIR
 )
 
+INF_DIRS=(
+    $INFSUM_DIR
+    $INF_DIR
+    $NOINF_DIR
+)
+
 # function to clean intermediate directories
 clean_up() {
     local KEEP_OUTPUTS=$1
@@ -95,7 +105,7 @@ clean_up() {
     if [[ "$KEEP_OUTPUTS" = true ]]; then
         for dir in */; do
             dirname="${dir%/}"
-            if [[ "$dirname" != "$OUT_DIR" && "$dirname" != "$SCRIPT_DIR" && "$dirname" != "$DATA_DIR" && "$dirname" != "$CAT_DIR" && "$dirname" != "$BIN_DIR" && "$dirname" != "$SIG_BIN_DIR" ]]; then
+            if [[ "$dirname" != "$OUT_DIR" && "$dirname" != "$SCRIPT_DIR" && "$dirname" != "$DATA_DIR" && "$dirname" != "$CAT_DIR" && "$dirname" != "$BIN_DIR" && "$dirname" != "$SIG_BIN_DIR" && "$dirname" != "$SIG_SNP_DIR" ]]; then
             echo "Removing $dirname..."
             rm -rf "$dirname"
             fi
@@ -130,6 +140,10 @@ main () {
     # reformat and combine UMass data
     echo "Aggregating UMass data..."
     Rscript "${SCRIPT_DIR}/${AGG_DIR}/umass_aggregation.R"
+
+    # reformat and combine AnswerALS data
+    echo "Aggregating AnswerALS data..."
+    Rscript "${SCRIPT_DIR}/${AGG_DIR}/answer_als_aggregation.R"
 
     # convert files to BED for later realignment
     echo "Converting to BED for realignment..."
@@ -216,7 +230,7 @@ main () {
         mkdir -p "${BIN_DIR}/${CDIR}"
         mkdir -p "${SIG_BIN_DIR}/${CDIR}"
     done
-    Rscript "${SCRIPT_DIR}/${ANA_DIR}/find_ALS_peaks.R"
+    Rscript "${SCRIPT_DIR}/${ANA_DIR}/find_als_peaks.R"
 
     # make rcircos plot
     echo "Creating RCircos plot..."
@@ -225,6 +239,13 @@ main () {
     # make linear histograms
     echo "Creating linear histograms..."
     Rscript "${SCRIPT_DIR}/${PLT_DIR}/snp_dist_histograms.R"
+
+    # call out significant snps
+    echo "Identifying significant SNPs"
+    for IDIR in "${INF_DIRS[@]}"; do
+        mkdir -p "${SIG_SNP_DIR}/${IDIR}"
+    done
+    Rscript "${SCRIPT_DIR}/${ANA_DIR}/find_high_conf_snps.R"
 
     # clean all folders except outputs/
     clean_up true

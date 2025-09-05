@@ -77,6 +77,7 @@ main <- function () {
       # write to output files
       for (class in class_types) {
         current_floc <- here("summary_statistics_categorized", class, func)
+        dir.create(current_floc, recursive = TRUE, showWarnings = FALSE)
         current_faddress <- here(current_floc, paste0("als.sumstats.lmm.chr", chrom_idx, ".", func, ".", class, ".txt"))
       
         fwrite(

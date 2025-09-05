@@ -49,7 +49,7 @@ main <- function() {
   data_umass$a2 <- toupper(data_umass$a2)
   
   # remove indels
-  data_umass[(nchar(data_umass$a1) == 1 & nchar(data_umass$a2) == 1), ]
+  data_umass <- data_umass[(nchar(data_umass$a1) == 1 & nchar(data_umass$a2) == 1), ]
   
   # add tag to identify data origin
   data_umass$orig <- "umass"

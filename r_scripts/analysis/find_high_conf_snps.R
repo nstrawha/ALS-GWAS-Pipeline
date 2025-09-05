@@ -102,8 +102,7 @@ main <- function() {
     genome_pheno_counts <- list()
     genome_clinsig_counts <- list()
     
-    all_info_snps_list <- list()
-    all_noinfo_snps_list <- list()
+    sig_snps_list <- list()
     
     for (chrom_idx in 1:num_chromosomes) {
       current_chr_snps <- current_class_snp_df[current_class_snp_df$chr == chrom_idx, ]
@@ -121,75 +120,60 @@ main <- function() {
       
       hits <- findOverlaps(current_snps_gr, current_bins_gr, type = "within")
       sig_snps <- current_chr_snps[queryHits(hits), ]
-      
-      has_no_info <- (sig_snps$phenotype_description == "none" & sig_snps$clinical_significance == "none")
-      info_snps <- sig_snps[!has_no_info, ]
-      noinfo_snps <- sig_snps[has_no_info, ]
 
       # filter for significant p-values
-      info_snps <- info_snps[info_snps$p <= 0.05, ]
-      noinfo_snps <- noinfo_snps[noinfo_snps$p <= 0.05, ]
+      sig_snps <- sig_snps[sig_snps$p <= 0.05, ]
       
       # store snps for later writing
-      all_info_snps_list[[chrom_idx]] <- info_snps
-      all_noinfo_snps_list[[chrom_idx]] <- noinfo_snps
+      sig_snps_list[[chrom_idx]] <- sig_snps
       
       # store genome-wide counts
-      genome_pheno_counts[[chrom_idx]] <- info_snps[, .N, by = phenotype_description]
-      genome_clinsig_counts[[chrom_idx]] <- info_snps[, .N, by = clinical_significance]
+      genome_pheno_counts[[chrom_idx]] <- sig_snps[, .N, by = phenotype_description]
+      genome_clinsig_counts[[chrom_idx]] <- sig_snps[, .N, by = clinical_significance]
     }
     
     # aggregate all snps
-    all_info_snps_df <- rbindlist(all_info_snps_list)
-    all_noinfo_snps_df <- rbindlist(all_noinfo_snps_list)
+    all_sig_snps_df <- rbindlist(sig_snps_list)
     
     # aggregate genome-wide counts
     genome_pheno_df <- rbindlist(genome_pheno_counts)[, .(count = sum(N)), by = phenotype_description][order(-count)]
     genome_clinsig_df <- rbindlist(genome_clinsig_counts)[, .(count = sum(N)), by = clinical_significance][order(-count)]
     
     # write info/no-info SNPs
-    info_faddress <- here(
+    output_faddress <- here(
       "significant_snps", 
-      "pheno_or_clinsig_info",
-      paste0("significant_snps_", class, "_with_info.txt")
+      paste0("significant_snps_", class, ".csv")
     )
     
-    noinfo_faddress <- here(
-      "significant_snps", 
-      "no_info",
-      paste0("significant_snps_", class, "_no_info.txt")
-    )
+    dir.create(here("significant_snps"), recursive = TRUE, showWarnings = FALSE)
+    
+    # sort by pval
+    all_sig_snps_df <- all_sig_snps_df %>% 
+      arrange(p)
     
     fwrite(
-      all_info_snps_df, 
-      file = info_faddress, 
+      all_sig_snps_df, 
+      file = output_faddress, 
       col.names = TRUE, 
-      sep = "\t", 
       quote = FALSE
     )
     
-    fwrite(
-      all_noinfo_snps_df, 
-      file = noinfo_faddress, 
-      col.names = TRUE, 
-      sep = "\t", 
-      quote = FALSE
-    )
+    # write gene p-values
+    dir.create(here("significant_snps", "genes_summary"), recursive = TRUE, showWarnings = FALSE)
     
-    # write genome-wide summaries
+    gene_pvals <- all_sig_snps_df %>%
+      group_by(hgnc_symbol) %>%
+      summarise(
+        avg_p = mean(p, na.rm = TRUE),
+        snp_count = n()
+      ) %>%
+      arrange(avg_p)
+    
+    # write to file
     fwrite(
-      genome_pheno_df,
-      file = here("significant_snps", "info_summary", paste0("genomewide_pheno_summary_", class, ".txt")),
+      gene_pvals,
+      file = here("significant_snps", "genes_summary", paste0("gene_pvals_", class, ".csv")),
       col.names = TRUE,
-      sep = "\t",
-      quote = FALSE
-    )
-    
-    fwrite(
-      genome_clinsig_df,
-      file = here("significant_snps", "info_summary", paste0("genomewide_clinsig_summary_", class, ".txt")),
-      col.names = TRUE,
-      sep = "\t",
       quote = FALSE
     )
   }

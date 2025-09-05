@@ -18,10 +18,10 @@ main <- function() {
   num_chromosomes <- 22
   
   floc_orig <- "summary_statistics_combined"
-  floc_ans <- "AnswerALS_GWAS"
+  floc_ans <- here("original_data", "AnswerALS_GWAS")
   floc_new  <- "summary_statistics_combined"
   
-  fname_ans <- "VanRheenen_2021_ALL.processed.tsv"
+  fname_ans <- "VanRheenen_2021_ALL.processed.tsv.gz"
   faddress_ans <- here(floc_ans, fname_ans)
   
   # read and filter answerALS data
@@ -45,7 +45,14 @@ main <- function() {
   setcolorder(data_ans, c("chr", "snp", "bp", "a1", "a2", "freq", "b", "se", "p"))
   
   # remove indels
-  data_ans[(nchar(data_ans$a1) == 1 & nchar(data_ans$a2) == 1), ]
+  data_ans <- data_ans[(nchar(data_ans$a1) == 1 & nchar(data_ans$a2) == 1), ]
+  
+  # remove malformed rows
+  data_ans <- data_ans[grepl(":", data_ans$snp), ]
+  
+  # force alleles to upper case
+  data_ans$a1 <- toupper(data_ans$a1)
+  data_ans$a2 <- toupper(data_ans$a2)
   
   # add tag to identify data origin
   data_ans$orig <- "answerALS"
@@ -66,13 +73,7 @@ main <- function() {
     
     # write to output file
     fname_new <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
-    faddress_new <- here(floc_new, fname_new)
-    
-    dir.create(
-      dirname(faddress_new), 
-      recursive = TRUE, 
-      showWarnings = FALSE
-    )
+    faddress_new <- here(floc_new, fname_new) 
     
     fwrite(
       data_to_write, 

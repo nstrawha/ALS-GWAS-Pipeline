@@ -92,10 +92,10 @@ call_relative_peaks <- function(pop, obs, nboots, p_cutoff, chr) {
     empty_dt <- data.table(
       bin_start	= numeric(), 
       bin_end = numeric(), 
-      count = int(), 
-      chr	= int(), 
+      count = integer(), 
+      chr	= integer(), 
       rel_freq = numeric(),	
-      bin_mid	= int(), 
+      bin_mid	= integer(), 
       mut_class	= character(), 
       pval = numeric(), 
       pop_rel_freq = numeric(), 

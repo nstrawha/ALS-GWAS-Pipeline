@@ -10,9 +10,12 @@ rm(list = ls())
 # load packages
 library(here)
 library(data.table)
+library(biomaRt)
 
 
 main <- function() {
+  
+  snp_mart <- useEnsembl(biomart = "ENSEMBL_MART_SNP", dataset = "hsapiens_snp")
   
   # set paths for file handling
   num_chromosomes <- 22
@@ -34,7 +37,7 @@ main <- function() {
   # iterate through chromosomes
   for (chrom_idx in 1:num_chromosomes) {
     
-    message("Finding duplicates for ", chrom_idx, " data")
+    message("Finding duplicates for chr ", chrom_idx, " data")
     
     # access original data
     fnames_orig <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.", hg_types, ".txt")
@@ -52,18 +55,27 @@ main <- function() {
     # find duplicate and unique snps
     dup_snps <- lapply(datas_orig, function(df) {
       
+      if (FALSE) { # TODO find out why we're not getting dups
+        
       # keep only duplicate snps
-      dups <- df[snp %in% df[duplicated(snp) | duplicated(snp, fromLast = TRUE), snp]]
+      dups <- df[snp %in% df[duplicated(snp) | duplicated(snp, fromLast = TRUE), snp], ]
       
       # collapse duplicates by averaging b, se, and p
       dups_avg <- dups[, .(
-        bp      = unique(bp)[1],          # bp should be same, but keep unique
+        chr     = chr[1], 
+        snp     = snp[1], 
+        bp      = bp[1], 
+        a1      = a1[1], 
+        a2      = a2[1], 
+        freq    = freq[1], 
         b       = mean(b, na.rm = TRUE),  # average effect sizes
         se      = mean(se, na.rm = TRUE), # same for SE
-        p       = mean(p, na.rm = TRUE)   # same for p
+        p       = mean(p, na.rm = TRUE),  # same for p
+        orig    = orig[1]
       ), by = snp]
+      }
       
-      return(dups_avg)
+      return(df)
     })
     
     dup_bps <- lapply(dup_snps, function(df) df$bp)
@@ -84,9 +96,9 @@ main <- function() {
     
     all_snps <- setNames(all_snps, data_types)
     
-    # remove all umass data
-    all_snps <- lapply(all_snps, function(snps) snps[orig != "umass"]) # remove umass snps
-    all_snps <- lapply(all_snps, function(snps) snps[orig != "answerALS"]) # remove answerALS snps
+    # remove all umass and answer als data
+    # all_snps <- lapply(all_snps, function(snps) snps[orig != "umass"]) # remove umass snps
+    # all_snps <- lapply(all_snps, function(snps) snps[orig != "answerALS"]) # remove answerALS snps
     all_snps <- lapply(all_snps, function(snps) snps[, orig := NULL])
     all_snps <- setNames(all_snps, data_types )
     

@@ -349,6 +349,7 @@ main <- function() {
       
       # write results
       output_floc <- here("significant_bins", class)
+      dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
       
       fwrite(
         significant_peaks, 
@@ -365,6 +366,9 @@ main <- function() {
     # un-nest binned data for writing
     binned_data <- lapply(binned_data, function(list) {rbindlist(list)})
     binned_data <- rbindlist(binned_data)
+    
+    output_floc <- here("binned_data")
+    dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
     
     fwrite(
       binned_data, 
