@@ -5,11 +5,14 @@
 # Jun. 2025
 # Script to reformat the realigned BED files into LMM files
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
-library(here)
-library(data.table)
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(data.table))
 
 # function to load data
 load_bed_data <- function(floc, fname, unmap) {
@@ -39,8 +42,13 @@ write_lmm_data <- function(lmm, bed, mapped_indices, hg_ver, idx, floc) {
   colnames(data_to_write) <- colnames(lmm)
   data_to_write$bp <- bed$end
   
+  # only keep duplicates
+  dups <- data_to_write[(duplicated(data_to_write$bp) | duplicated(data_to_write$bp, fromLast = TRUE)), ]
+  data_to_write <- dups %>% 
+    distinct(bp, .keep_all = TRUE)
+  
   # write output
-  fname <- paste0("als.sumstats.lmm.chr", idx, ".combined.hg", hg_ver, ".txt")
+  fname <- paste0("als.sumstats.lmm.chr", idx, ".combined.hg", hg_ver, ".csv")
   faddress <- here(floc, fname)
   
   dir.create(
@@ -51,8 +59,7 @@ write_lmm_data <- function(lmm, bed, mapped_indices, hg_ver, idx, floc) {
   
   fwrite(
     data_to_write, 
-    file = faddress, 
-    sep = "\t", 
+    file = faddress,
     col.names = TRUE, 
     quote = FALSE
   )
@@ -61,6 +68,8 @@ write_lmm_data <- function(lmm, bed, mapped_indices, hg_ver, idx, floc) {
 }
 
 
+# Main --------------------------------------------------------------------
+
 main <- function() {
   
   # set paths for file handling
@@ -68,8 +77,8 @@ main <- function() {
   
   floc_old_bed <- "summary_statistics_combined_bed_format_hg38"
   floc_old_lmm <- "summary_statistics_combined"
-  floc_hg38    <- "summary_statistics_hg38_orig";
-  floc_hg19    <- "summary_statistics_hg19_orig";
+  floc_hg38    <- "summary_statistics_hg38";
+  floc_hg19    <- "summary_statistics_hg19";
   
   # iterate through chromosomes
   for (chrom_idx in 1:num_chromosomes) {
@@ -85,7 +94,7 @@ main <- function() {
     bed_data_hg19  <- load_bed_data(floc = floc_old_bed, fname = fname_bed_hg19, unmap = TRUE)
     
     # access the old lmm data
-    fname_lmm <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
+    fname_lmm <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
     faddress_lmm <- here(floc_old_lmm, fname_lmm)
     lmm_data <- fread(faddress_lmm)
     

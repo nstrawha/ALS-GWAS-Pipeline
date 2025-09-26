@@ -6,7 +6,7 @@
 # Function to call peaks of one distribution relative to another w/ bootstrapping
 # Assumes pop and obs each have columns "count" and "bin_start"
 
-bin_data <- function(df, binwidth, chr, class, type) {
+bin_data_reg <- function(df, binwidth, chr, class, type) {
   snp_data <- data.frame(
     bp = df$bp
   )
@@ -24,6 +24,65 @@ bin_data <- function(df, binwidth, chr, class, type) {
       rel_freq = count / total_snps,
       bin_mid = bin_start + binwidth / 2, 
       mut_class = class, 
+      data_type = type
+    )
+  
+  return(binned_data)
+}
+
+
+bin_data_gene <- function(df, ranges, chr, class, type) {
+  
+  # restrict gene ranges to this chromosome
+  gene_chr <- ranges[seqnames(ranges) == paste0("chr", chr), ]
+  
+  # sort genes to define igen regions
+  gene_chr <- sort(gene_chr)
+  
+  # get intergenic as the complement of gene ranges
+  igen <- gaps(gene_chr)
+  
+  # remove seqnames and empty ranges outside the chromosome
+  igen <- igen[strand(igen) == "*" & width(igen) > 0]
+  
+  # label them
+  igen$gene_id <- paste0("igen_", seq_along(igen))
+  igen$gene_name <- "igen"
+  
+  # build gr from df
+  snp_gr <- GRanges(
+    seqnames = paste0("chr", chr),
+    ranges = IRanges(start = df$bp, end = df$bp)
+  )
+  
+  # combine genes + igen
+  bins <- c(gene_chr, igen)
+  
+  # overlap snps with bins
+  hits <- findOverlaps(snp_gr, bins)
+  
+  # assign SNPs to bins
+  snp_bin <- tibble(
+    bp = start(snp_gr)[queryHits(hits)],
+    gene_id = bins$gene_id[subjectHits(hits)],
+    gene_name = bins$gene_name[subjectHits(hits)]
+  )
+  
+  # count SNPs per bin
+  total_snps <- nrow(df)
+  binned_data <- snp_bin %>%
+    group_by(gene_id, gene_name) %>%
+    summarise(
+      count = n(),
+      bin_start = min(bp),
+      bin_end = max(bp),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      chr = chr,
+      rel_freq = count / total_snps,
+      bin_mid = (bin_start + bin_end) / 2,
+      mut_class = class,
       data_type = type
     )
   

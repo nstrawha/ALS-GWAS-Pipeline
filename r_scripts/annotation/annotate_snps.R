@@ -5,14 +5,19 @@
 # Jun. 2025
 # Script to annotate snp location purposes after finding duplicates
 
+
+# Setup and functions -----------------------------------------------------
+
+rm(list = ls())
+
 # load packages
-library(here)
-library(tidyverse)
-library(data.table)
-library(GenomicFeatures)
-library(GenomicRanges)
-library(rtracklayer)
-library(biomaRt)
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(GenomicFeatures))
+suppressPackageStartupMessages(library(GenomicRanges))
+suppressPackageStartupMessages(library(rtracklayer))
+suppressPackageStartupMessages(library(biomaRt))
 
 # function to categorize snps based on overlaps
 categorize_snps <- function(flist, snps_gr, snps_df, fgrs) {
@@ -34,8 +39,13 @@ categorize_snps <- function(flist, snps_gr, snps_df, fgrs) {
 }
 
 
+# Main -------------------------------------------------------------------
+
 main <- function() {
   
+
+  # Loading the annotation info -------------------------------------------
+
   # load marts
   snp_mart <- useEnsembl(biomart = "snp", dataset = "hsapiens_snp")
   ensembl_mart <- useEnsembl(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
@@ -73,8 +83,6 @@ main <- function() {
   # load separate annotation types
   intron_gr      <- intronsByTranscript(txdb_hg38) # no strand info yet
   exon_gr        <- exons(txdb_hg38)
-  # promoter_gr    <- promoters(txdb_hg38) # BROKEN
-  # terminator_gr  <- terminators(txdb_hg38) # BROKEN
   cds_gr         <- cds(txdb_hg38)
   utr3_gr        <- threeUTRsByTranscript(txdb_hg38)
   utr5_gr        <- fiveUTRsByTranscript(txdb_hg38)
@@ -84,7 +92,7 @@ main <- function() {
   utr3_gr   <- unlist(utr3_gr, use.names = FALSE)
   utr5_gr   <- unlist(utr5_gr, use.names = FALSE)
   
-  # PROMOTERS AND TERMINATORS FUNCS NOT INCLUDED IN PIPELINE R VER
+  # promoters and terminators functions are not included in this R version
   # build manually
   tx <- transcripts(txdb_hg38)
   tss <- ifelse(strand(tx) == "+", start(tx), end(tx))
@@ -114,14 +122,8 @@ main <- function() {
     functions_list
   )
   
-  # set output file locs
-  output_flocs <- setNames(
-    lapply(
-      functions_list, 
-      function(f) here("summary_statistics_annotated", f)
-    ), 
-    functions_list
-  )
+  # set output file loc
+  output_floc <- "summary_statistics_annotated"
   
   # initialize freqs of each annotation type
   n_annotations <- length(functions_list)
@@ -130,22 +132,24 @@ main <- function() {
     functions_list
   )
   
+
+  # Carrying out annotation -------------------------------------------------
+  
   # iterate through chromosomes
   for (chrom_idx in 1:num_chromosomes) {
     
-    message("Processing chr ", chrom_idx)
+    message("Annotating chr ", chrom_idx)
     
     # access original data
-    old_faddress <- here(
+    in_faddress <- here(
       "summary_statistics_hg38", 
-      "duplicate_snps", 
-      paste0("als.sumstats.lmm.chr", chrom_idx, ".hg38.dups.txt")
+      paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.hg38.csv")
       )
     
-    old_data <- fread(file = old_faddress)
+    in_data <- fread(file = in_faddress)
     
     # annotate snp info
-    rs_vec <- old_data$snp
+    rs_vec <- in_data$snp
     snp_info <- getBM(
       attributes = c(
         "refsnp_id",
@@ -157,16 +161,16 @@ main <- function() {
       mart = snp_mart
     )
     
-    old_data <- old_data %>%
+    in_data <- in_data %>%
       left_join(snp_info, by = c("snp" = "refsnp_id"))
     
     # set up granges
     data_gr <- GRanges(
       seqnames = paste0("chr", chrom_idx), 
-      ranges = IRanges(start = old_data$bp, end = old_data$bp)
+      ranges = IRanges(start = in_data$bp, end = in_data$bp)
       )
     
-    col_names <- colnames(old_data)
+    col_names <- colnames(in_data)
     
     # get ensembl ids and gene names
     gene_ovlps <- findOverlaps(data_gr, gene_info)
@@ -174,7 +178,7 @@ main <- function() {
     gene_hits <- gene_info[subjectHits(gene_ovlps)]
     
     snp_gene_df <- data.frame(
-      snp = old_data$snp[queryHits(gene_ovlps)],
+      snp = in_data$snp[queryHits(gene_ovlps)],
       ensembl_gene_id = names(gene_hits)
     )
     
@@ -185,97 +189,48 @@ main <- function() {
         hgnc_symbol = ifelse(is.na(hgnc_symbol), "NA", hgnc_symbol)
       )
     
-    old_data <- left_join(old_data, snp_gene_annotated, by = "snp")
+    in_data <- left_join(in_data, snp_gene_annotated, by = "snp")
     
     # set all na entries to "none"
-    old_data <- old_data %>%
+    in_data <- in_data %>%
       mutate(across(everything(), ~ ifelse(. == "" | is.na(.), "none", .)))
     
     # categorize all snps for each function
     all_snps <- categorize_snps(
       flist = functions_list, 
       snps_gr = data_gr, 
-      snps_df = old_data, 
+      snps_df = in_data, 
       fgrs = func_grs_list
       )
     
     # set output file names and addresses
-    output_fnames <- setNames(
-      lapply(
-        functions_list, 
-        function(f) paste0("als.sumstats.lmm.chr", chrom_idx, ".", f, ".txt")
-        ),
-      functions_list
-    )
+    output_fname <- paste0("als.sumstats.lmm.chr", chrom_idx, ".annotated.csv")
+    output_faddress <- here(output_floc, output_fname)
     
-    output_faddresses <- setNames(
-      mapply(file.path, output_flocs, output_fnames, SIMPLIFY = FALSE), 
-      functions_list
-    )
-    
-    # write output files
+    # add col name to identify functional regions
     for (f in functions_list) {
-      
       current_snps <- all_snps[[f]]
       current_snps$func <- f
-      
-      # ensure directory is created
-      dir.create(
-        dirname(output_faddresses[[f]]), 
-        recursive = TRUE, 
-        showWarnings = FALSE
-      )
-      
-      # write output
-      fwrite(
-        current_snps, 
-        file = output_faddresses[[f]], 
-        sep = "\t", 
-        col.names = TRUE, 
-        quote = FALSE)
+      all_snps[[f]] <- current_snps
     }
     
-    # record freqs of each annotation type
-    for (f in functions_list) {
-      ffreqs_store[[f]] <- ffreqs_store[[f]] + nrow(unique(all_snps[[f]]))
-    }
+    all_snps <- rbindlist(all_snps)
+    
+    # write to output file
+    dir.create(
+      dirname(output_faddress), 
+      recursive = TRUE, 
+      showWarnings = FALSE
+      )
+    
+    # write output
+    fwrite(
+      all_snps, 
+      file = output_faddress, 
+      col.names = TRUE, 
+      quote = TRUE
+      )
   }
-  
-  # create bar plot
-  ffreqs_store <- unlist(ffreqs_store)
-  rel_ffreqs <- ffreqs_store / sum(ffreqs_store)
-  
-  labels <- c(
-    "Intron", 
-    "Exon", 
-    "CDS", 
-    "Promoter", 
-    "Terminator", 
-    "3'UTR", 
-    "5'UTR", 
-    "N/A"
-    )
-  
-  # structure data for plotting
-  df_to_plot <- data.frame(
-    category = labels,
-    count = ffreqs_store,
-    rel_freq = rel_ffreqs
-  )
-  
-  # plot freq data
-  hist <- ggplot(df_to_plot, aes(x = category, y = rel_freq)) +
-    geom_bar(stat = "identity") +
-    geom_text(aes(label = paste0("n = ", count)), vjust = -0.5, size = 4) +
-    ylab("Relative Frequency") +
-    xlab("Functional Region")
-  
-  # save resulting freq plot
-  ggsave(
-    filename = here("outputs", "snp_function_barplot.png"), 
-    plot = hist, 
-    width = 10, height = 5
-  )
   
   invisible(NULL)
 }

@@ -4,7 +4,9 @@
 # Modified from RCircos package, v. 1.2.2, Henry Zhang for Yini Li lab use
 # Jul. 2025
 
-# redefine param reassignment function
+
+# Parameter reassignment function -----------------------------------------
+
 # can modify more params with this
 RCircos.Reset.Plot.Parameters.Custom <- function (new.params = NULL) {
   
@@ -95,7 +97,8 @@ RCircos.Reset.Plot.Parameters.Custom <- function (new.params = NULL) {
 }
 
 
-# redefine ideogram plotting function
+# Ideogram plotting function ----------------------------------------------
+
 # removes ticks and chr labels
 RCircos.Chromosome.Ideogram.Plot.Custom <- function (tick.interval = 0) {
   RCircos.Draw.Chromosome.Ideogram.Custom()
@@ -126,7 +129,8 @@ RCircos.Draw.Chromosome.Ideogram.Custom <- function (ideo.pos = NULL, ideo.width
 }
 
 
-# redefine histogram function
+# Histogram function ------------------------------------------------------
+
 # removes chr section outlines
 RCircos.Histogram.Plot.Custom <- function (hist.data = NULL, data.col = 4, 
                                            track.num = NULL, side = c("in", "out"), 

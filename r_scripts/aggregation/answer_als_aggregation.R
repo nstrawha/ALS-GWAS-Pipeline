@@ -5,12 +5,17 @@
 # Aug. 2025
 # Script to handle and aggregate Answer ALS data
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
-library(here)
-library(data.table)
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(data.table))
 
+
+# Main --------------------------------------------------------------------
 
 main <- function() {
   
@@ -19,7 +24,7 @@ main <- function() {
   
   floc_orig <- "summary_statistics_combined"
   floc_ans <- here("original_data", "AnswerALS_GWAS")
-  floc_new  <- "summary_statistics_combined"
+  floc_out  <- "summary_statistics_combined"
   
   fname_ans <- "VanRheenen_2021_ALL.processed.tsv.gz"
   faddress_ans <- here(floc_ans, fname_ans)
@@ -63,22 +68,27 @@ main <- function() {
     message("Aggregating chr ", chrom_idx, " from AnswerALS data")
     
     # open the original file and read data
-    fname_orig <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
+    fname_orig <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
     faddress_orig <- here(floc_orig, fname_orig)
     data_orig <- fread(faddress_orig)
     
-    # append answerALS data to mine data
+    # append answer als data to mine data
     chrom_data_ans <- data_ans[data_ans$chr == chrom_idx]
     data_to_write <- rbind(data_orig, chrom_data_ans)
     
     # write to output file
-    fname_new <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
-    faddress_new <- here(floc_new, fname_new) 
+    fname_out <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
+    faddress_out <- here(floc_out, fname_out) 
+    
+    dir.create(
+      dirname(faddress_out), 
+      recursive = TRUE, 
+      showWarnings = FALSE
+    )
     
     fwrite(
       data_to_write, 
-      file = faddress_new, 
-      sep = "\t", 
+      file = faddress_out, 
       col.names = TRUE, 
       quote = FALSE
       )

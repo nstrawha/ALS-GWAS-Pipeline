@@ -5,11 +5,14 @@
 # Apr. 2025
 # Script to deduplicate and aggregate Project MinE ALS data
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
-library(here)
-library(data.table)
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(data.table))
 
 # function to load data
 load_mine_data <- function(year, idx) {
@@ -20,12 +23,14 @@ load_mine_data <- function(year, idx) {
 }
 
 
+# Main --------------------------------------------------------------------
+
 main <- function() {
   
   # set paths for file handling
   num_chromosomes <- 22
   
-  floc_new  <- "summary_statistics_combined"
+  floc_out  <- "summary_statistics_combined"
   
   # iterate over chromosomes
   for (chrom_idx in 1:num_chromosomes) {
@@ -61,19 +66,18 @@ main <- function() {
     
     # write to output file
     colnames(data_to_write) <- colnames(data_2018)
-    fname_new <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
-    faddress_new <- here(floc_new, fname_new)
+    fname_out <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
+    faddress_out <- here(floc_out, fname_out)
     
     dir.create(
-      dirname(faddress_new), 
+      dirname(faddress_out), 
       recursive = TRUE, 
       showWarnings = FALSE
-    )
+      )
     
     fwrite(
       data_to_write,
-      file = faddress_new,
-      sep = "\t",
+      file = faddress_out,
       col.names = TRUE,
       quote = FALSE
       )

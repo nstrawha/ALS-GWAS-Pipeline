@@ -1,25 +1,30 @@
 #!/usr/bin/env Rscript
 
-# find_als_peaks.R
+# call_als_peaks.R
 # Code by Noah Strawhacker
 # Aug. 2025
 # Script to identify ALS peaks using a control distribution
 # Note: script HAS to be run in linux - breaks with the fread/cmd line
 # cmd to run: Rscript r_scripts/analysis/find_ALS_peaks.R
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
-library(data.table)
-library(here)
-library(tidyverse)
-library(GenomicFeatures)
-library(GenomicRanges)
-library(rtracklayer)
-library(Biostrings)
-library(BSgenome.Hsapiens.UCSC.hg38)
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(GenomicFeatures))
+suppressPackageStartupMessages(library(GenomicRanges))
+suppressPackageStartupMessages(library(rtracklayer))
+suppressPackageStartupMessages(library(Biostrings))
+suppressPackageStartupMessages(library(BSgenome.Hsapiens.UCSC.hg38))
 source(here("r_scripts", "analysis", "peak_calling_functions.R"))
 
+
+# Main --------------------------------------------------------------------
 
 main <- function() {
   
@@ -32,24 +37,9 @@ main <- function() {
   num_chromosomes <- 22
   
   genome_ref <- BSgenome.Hsapiens.UCSC.hg38
+
   
-  functions_list <- c(
-    "intron", 
-    "exon", 
-    "cds",
-    "promoter", 
-    "terminator", 
-    "utr3", 
-    "utr5", 
-    "unannotated"
-  )
-  
-  mutation_classes <- c(
-    "m6a_lof",
-    "m5c_lof", 
-    "m6a_gof", 
-    "other"
-  )
+  # Handling control data -------------------------------------------------
   
   # initialize hg38 chr names in the vcf file
   vcf_chr_names <- c(
@@ -80,6 +70,27 @@ main <- function() {
   # file locations
   als_floc <- here("summary_statistics_categorized")
   vcf_loc <- here("original_data", "freq.vcf.gz")
+  
+  # get gtf for gene ranges
+  gtf <- fread(here("original_data", "hg38.ensGene.gtf"))
+  colnames(gtf) <- c("seqnames", "source", "func", "start", "end", "str1", "str2", "str3", "gene_info")
+  
+  # split gene info col
+  info_cols <- strsplit(gtf$gene_info, ";")
+  gtf$gene_id <- lapply(info_cols, "[[", 1)
+  
+  # collapse gtf to the gene level using exons
+  genes <- gtf[gtf$func == "exon"]
+  gene_ranges <- genes %>%
+    as.data.frame() %>%
+    group_by(gene_id) %>%
+    summarise(start = min(start), end = max(end), seqnames = seqnames) %>%
+    makeGRangesFromDataFrame(keep.extra.columns = TRUE)
+  
+  # clean to reduce overhead
+  rm(gtf)
+  rm(info_cols)
+  rm(genes)
   
   # bootstrapping params
   bin_size <- 1e5
@@ -112,13 +123,9 @@ main <- function() {
   }
   
   # initialize storage of binned data for later writing
-  all_binned_data <- list()
+  all_binned_data_reg <- list()
   
-  for (chrom_idx in 1:num_chromosomes) {
-    
-    # iterate over chrs, classes, and functions to reconstruct full data
-    als_data_list <- list()
-    dt_idx <- 1
+  for (chrom_idx in 22:num_chromosomes) {
     
     # gather control data for the chr
     message("Reading control data for chr ", chrom_idx)
@@ -139,32 +146,12 @@ main <- function() {
     )
     
     colnames(control_data) <- c("bp", "snp", "a1", "a2")
-    
-    for (class in mutation_classes) {
-      for (func in functions_list) {
         
-        message("Extracting data from ", class, " ", func, "s")
-        
-        # get categorized als data
-        fdata <- fread(file = here(
-          als_floc, 
-          class, 
-          func, 
-          paste0("als.sumstats.lmm.chr", chrom_idx, ".", func, ".", class, ".txt"))
-        )
-        
-        # append to record of all als data
-        als_data_list[[dt_idx]] <- fdata
-        dt_idx <- dt_idx + 1
-        
-      }
-    }
-    
-    message("Files for chr ", chrom_idx, " read")
-    
-    als_data <- rbindlist(als_data_list, use.names = TRUE, fill = TRUE)
-    
-    rm(als_data_list) # clean to reduce overhead
+    # get categorized als data
+    als_data <- fread(file = here(
+      als_floc, 
+      paste0("als.sumstats.lmm.chr", chrom_idx, ".categorized.csv"))
+      )
     
     # deduplicate als data (artifact of double-counting exons and cds, utr, etc)
     als_data <- als_data[!duplicated(als_data$snp), ]
@@ -173,7 +160,7 @@ main <- function() {
     als_data_gr <- GRanges(
       seqnames = paste0("chr", chrom_idx),
       ranges = IRanges(start = als_data$bp, end = als_data$bp)
-    )
+      )
     
     als_m6a_lof_data <- get_class_snps(
       data_df = als_data, 
@@ -258,7 +245,7 @@ main <- function() {
   
     # package into named list
     output_classes <- c(
-      "all", 
+      "other", 
       "m6a_lof", 
       "m5c_lof", 
       "m6a_gof"
@@ -276,20 +263,28 @@ main <- function() {
     names(data_to_analyze) <- output_classes
     
     message("Data restructured for binning")
+
+    
+    # Binning data --------------------------------------------------------
     
     # bin data into histograms
     bin_types <- c("als", "control")
-    binned_data <- list()
+    binned_data_reg <- list()
+    binned_data_gene <- list()
     
     for (list_idx in 1:length(data_to_analyze)) {
-      current_list <- data_to_analyze[[list_idx]]
+      current_list_reg <- data_to_analyze[[list_idx]]
+      current_list_gene <- list()
+      
       current_class <- output_classes[[list_idx]]
      
       for (type_idx in 1:length(bin_types)) {
-        current_df <- current_list[[type_idx]]
+        current_df <- current_list_reg[[type_idx]]
         current_type <- bin_types[[type_idx]]
         
-        current_bins <- bin_data(
+        message("binning for ", bin_types[[type_idx]], ", data type ", data_classes[[list_idx]])
+        
+        current_bins_reg <- bin_data_reg(
           df = current_df, 
           binwidth = bin_size, 
           chr = chrom_idx, 
@@ -297,88 +292,128 @@ main <- function() {
           type = current_type
         )
         
-        current_list[[type_idx]]<- current_bins
+        current_bins_gene <- bin_data_gene(
+          df = current_df, 
+          ranges = gene_ranges, 
+          chr = chrom_idx, 
+          class = output_classes[list_idx], 
+          type = current_type
+        )
+        
+        current_list_reg[[type_idx]]<- current_bins_reg
+        current_list_gene[[type_idx]]<- current_bins_gene
       }
       
-      binned_data[[list_idx]] <- current_list
-      names(binned_data[[list_idx]]) <- bin_types
+      binned_data_reg[[list_idx]] <- current_list_reg
+      names(binned_data_reg[[list_idx]]) <- bin_types
+      
+      binned_data_gene[[list_idx]] <- current_list_gene
+      names(binned_data_gene[[list_idx]]) <- bin_types
     }
     
     message("chr ", chrom_idx, " data binned")
     
     rm(data_to_analyze) # clean to reduce overhead
     
-    # bootstrap and write
-    names(binned_data) <- output_classes
     
-    for (class in output_classes) {
+    # Bootstrapping analysis ----------------------------------------------
+
+    # bootstrap and write reg bin data
+    names(binned_data_reg) <- output_classes
+    names(binned_data_gene) <- output_classes
+    binned_data_list <- list(binned_data_reg, binned_data_gene)
+    
+    for (bin_type in 1:length(binned_data_list)) {
+      binned_data <- binned_data_list[[bin_type]]
       
-      # unpack als and control data
-      current_dfs <- binned_data[[class]]
-      
-      current_dfs <- lapply(current_dfs, function(df) {
-        df$data_type <- NULL
-        df
-      })
-      
-      als_bins <- current_dfs[["als"]]
-      control_bins <- current_dfs[["control"]]
-      
-      # carry out bootstrap analysis
-      significant_peaks <- call_relative_peaks(
-        pop = control_bins, 
-        obs = als_bins, 
-        nboots = num_bootstraps, 
-        p_cutoff = pval_cutoff, 
-        chr = chrom_idx
-      )
-      
-      significant_peaks <- data.table(significant_peaks)
-      
-      if (nrow(significant_peaks) > 0) {
+      for (class in output_classes) {
         
-        # add confidence level tags to bins based on p-value
-        significant_peaks[, conf_lvl := fifelse(pval <= 5e-8, "5e-8",
-                                                fifelse(pval <= 1e-5, "1e-5",
-                                                        fifelse(pval <= 1e-3, "1e-3",
-                                                                fifelse(pval <= 0.05, "0.05", ">0.05"))))]
+        # unpack als and control data
+        current_dfs <- binned_data[[class]]
+        
+        current_dfs <- lapply(current_dfs, function(df) {
+          df$data_type <- NULL
+          df
+        })
+        
+        als_bins <- current_dfs[["als"]]
+        control_bins <- current_dfs[["control"]]
+        
+        # carry out bootstrap analysis
+        significant_peaks <- call_relative_peaks(
+          pop = control_bins, 
+          obs = als_bins, 
+          nboots = num_bootstraps, 
+          p_cutoff = pval_cutoff, 
+          chr = chrom_idx
+        )
+        
+        significant_peaks <- data.table(significant_peaks)
+        
+        if (nrow(significant_peaks) > 0) {
+          
+          # add confidence level tags to bins based on p-value
+          significant_peaks[, conf_lvl := fifelse(pval <= 5e-8, "5e-8",
+                                                  fifelse(pval <= 1e-5, "1e-5",
+                                                          fifelse(pval <= 1e-3, "1e-3",
+                                                                  fifelse(pval <= 0.05, "0.05", ">0.05"))))]
+        }
+        
+        sig_rate <- (nrow(significant_peaks) / nrow(control_bins)) * 100
+        message("Significance rate for chr", chrom_idx, ", ", class, ": ", sig_rate, " %")
+        
+        # write results
+        output_floc <- here("significant_bins", class)
+        dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
+        
+        if (bin_type == 1) fname <- paste0("reg_significant_peaks_chr", chrom_idx, ".csv")
+        else fname <- paste0("gene_significant_peaks_chr", chrom_idx, ".csv")
+        
+        dir.create(
+          output_floc, 
+          recursive = TRUE, 
+          showWarnings = FALSE
+        )
+        
+        fwrite(
+          significant_peaks, 
+          file = here(
+            output_floc, 
+            fname
+          ),
+          col.names = TRUE, 
+          quote = FALSE
+        )
       }
       
-      sig_rate <- (nrow(significant_peaks) / nrow(control_bins)) * 100
-      message("Significance rate for chr", chrom_idx, ", ", class, ": ", sig_rate, " %")
+      # un-nest binned data for writing
+      binned_data <- lapply(binned_data, function(list) {rbindlist(list)})
+      binned_data <- rbindlist(binned_data)
       
-      # write results
-      output_floc <- here("significant_bins", class)
+      output_floc <- here("binned_data")
       dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
       
-      fwrite(
-        significant_peaks, 
-        file = here(
-          output_floc, 
-          paste0("significant_peaks_chr", chrom_idx, "_", class,".txt")
-        ), 
-        sep = "\t",
-        col.names = TRUE, 
-        quote = FALSE
+      if (bin_type == 1) fname <- paste0("reg_binned_counts_chr", chrom_idx, ".csv")
+      else fname <- paste0("gene_binned_counts_chr", chrom_idx, ".csv")
+      
+      output_floc <- "binned_data"
+      
+      dir.create(
+        output_floc, 
+        recursive = TRUE, 
+        showWarnings = FALSE
       )
+      
+      fwrite(
+        binned_data, 
+        file = here(output_floc, fname), 
+        sep = "\t", 
+        quote = FALSE, 
+        col.names = TRUE
+      )
+      
+      rm(binned_data) # clean to reduce overhead
     }
-    
-    # un-nest binned data for writing
-    binned_data <- lapply(binned_data, function(list) {rbindlist(list)})
-    binned_data <- rbindlist(binned_data)
-    
-    output_floc <- here("binned_data")
-    dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
-    
-    fwrite(
-      binned_data, 
-      file = here("binned_data", paste0("binned_counts_chr", chrom_idx, ".txt")), 
-      sep = "\t", 
-      quote = FALSE, 
-      col.names = TRUE
-    )
-    
-    rm(binned_data) # clean to reduce overhead
   }
   
   invisible(NULL)

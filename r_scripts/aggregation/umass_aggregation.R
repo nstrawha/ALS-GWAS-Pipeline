@@ -5,12 +5,17 @@
 # Apr. 2025
 # Script to handle and aggregate UMass ALS data
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
-library(here)
-library(data.table)
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(data.table))
 
+
+# Main --------------------------------------------------------------------
 
 main <- function() {
   
@@ -18,11 +23,11 @@ main <- function() {
   num_chromosomes <- 22
   
   floc_mine <- "summary_statistics_combined"
-  file_loc_umass <- here("original_data", "umass_data")
-  floc_new  <- "summary_statistics_combined"
+  floc_umass <- here("original_data", "umass_data")
+  floc_out  <- "summary_statistics_combined"
   
   fname_umass <- "alsMetaSummaryStats_march21st2018.txt"
-  faddress_umass <- here(file_loc_umass, fname_umass)
+  faddress_umass <- here(floc_umass, fname_umass)
   
   # read and filter umass data
   data_umass_orig <- fread(faddress_umass)
@@ -60,7 +65,7 @@ main <- function() {
     message("Aggregating chr ", chrom_idx, " from UMass data")
     
     # open the MinE file and read data
-    fname_mine <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
+    fname_mine <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
     faddress_mine <- here(floc_mine, fname_mine)
     data_mine <- fread(faddress_mine)
     data_mine$orig <- "mine" # add tag
@@ -70,18 +75,18 @@ main <- function() {
     data_to_write <- rbind(data_mine, chrom_data_umass)
     
     # write to output file
-    fname_new <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.txt")
-    faddress_new <- here(floc_new, fname_new)
+    fname_out <- paste0("als.sumstats.lmm.chr", chrom_idx, ".combined.csv")
+    faddress_out <- here(floc_out, fname_out)
     
     dir.create(
-      dirname(faddress_new), 
+      dirname(faddress_out), 
       recursive = TRUE, 
       showWarnings = FALSE
     )
     
     fwrite(
       data_to_write, 
-      file = faddress_new, 
+      file = faddress_out, 
       sep = "\t", 
       col.names = TRUE, 
       quote = FALSE

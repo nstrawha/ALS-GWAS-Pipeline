@@ -5,6 +5,9 @@
 # Jul. 2025
 # Script to create rcircos circular histogram of snp distributions
 
+
+# Setup and functions -----------------------------------------------------
+
 rm(list = ls())
 
 # load packages
@@ -14,106 +17,69 @@ library(data.table)
 library(RCircos)
 source(here("r_scripts", "plotting", "rcircos_modified_functions.R"))
 
+
+# Main --------------------------------------------------------------------
+
 main <- function() {
   
-  message("Setting up data for RCircos histogram")
+  # perform pval cut or no
+  pval_cut <- FALSE
   
   # set params
   num_chromosomes <- 22
   
-  functions_list <- c(
-    "intron", 
-    "exon", 
-    "cds", # remove; already present in exons
-    "promoter", 
-    "terminator", 
-    "utr3", # remove; already present in exons
-    "utr5", # remove; already present in exons
-    "unannotated"
-  )
+  in_floc <- "summary_statistics_tmic_ps" # TODO change this
   
-  class_types <- c(
-    "m6a_lof",
-    "m5c_lof", 
-    "m6a_gof", 
-    "other"
-  )
+  plot_store <- list()
   
-  # get col names from small dataset
-  dummy <- fread(file = here(
-    "summary_statistics_categorized", 
-    "m6a_lof", 
-    "utr5",
-    "als.sumstats.lmm.chr22.utr5.m6a_lof.txt"
-  ))
-  
-  cnames <- colnames(dummy)
-  
-  # initialize named lists and sublists of dfs to store data for rcircos plot
-  data_dfs_store <- setNames(
-    lapply(class_types, function(class) {
-      setNames(
-        lapply(functions_list, function(func) {
-          df <- data.frame(matrix(ncol = length(cnames), nrow = 0))
-          colnames(df) <- cnames
-          return(df)
-        }),
-        functions_list
-      )
-    }),
-    class_types
-  )
-  
-  # iterate through mutation categories
-  for (class in class_types) {
-    current_class_dfs <- data_dfs_store[[class]]
+  for (chrom_idx in 1:num_chromosomes) {
     
-    # iterate through functional regions
-    for (func in functions_list) {
-      current_func_dfs <- current_class_dfs[[func]]
-      
-      floc <- here("summary_statistics_categorized", class, func)
-      
-      # iterate through chromosomes
-      for (chrom_idx in 1:num_chromosomes) {
-        
-        message("Counting chr ", chrom_idx, " for ", class, " ", func, "s")
-        
-        # get data categorized by mutation class and functional region
-        faddress <- here(floc, paste0("als.sumstats.lmm.chr", chrom_idx, ".", func, ".", class, ".txt"))
-        fdata <- fread(file = faddress)
-        
-        # record df
-        current_func_dfs <- rbind(current_func_dfs, fdata)
-      }
-      
-      current_class_dfs[[func]] <- current_func_dfs
-    }
+    message("Recording SNP data for RCircos plot for chr ", chrom_idx)
     
-    data_dfs_store[[class]] <- current_class_dfs
+    # read data
+    in_faddress <- here(
+      in_floc, 
+      paste0(paste0("als.sumstats.lmm.chr", chrom_idx, ".tmic.ps.csv"))
+    )
+    
+    snp_data <- fread(file = in_faddress)
+    
+    # store data to plot
+    plot_store[[chrom_idx]] <- snp_data
+    
   }
   
-  new_class_types <- c(
-    "m6A LOF",
-    "m5C LOF", 
-    "m6A GOF", 
-    "All SNPs"
-  )
+  # bind data
+  plot_store <- rbindlist(plot_store)
   
-  # unlist and load data to plot as large dfs for each mutation class
-  data_dfs_store <- lapply(data_dfs_store, function(dfs) rbindlist(dfs))
+  # deduplicate
+  plot_store <- plot_store[!duplicated(plot_store$snp), ]
   
-  # replace other mutation category with all mutations
-  all_snps_df <- rbindlist(data_dfs_store)
-  colnames(all_snps_df) <- cnames
-  data_dfs_store[["other"]] <- all_snps_df
-  data_dfs_store <- setNames(data_dfs_store, new_class_types)
+  # separate into named list
+  mutation_cats <- list("other", "m6a_lof", "m6a_gof", "m5c_lof")
+  snps_list <- list()
   
-  # remove dups
-  data_dfs_store <- lapply(data_dfs_store, function(df) {
-    df %>%
-      distinct(snp, .keep_all = TRUE)
-  })
+  for (cat in mutation_cats) {
+    snps_list[[cat]] <- plot_store[plot_store$mut_cat == cat, ]
+  }
+  
+  # perform pval cut
+  if (pval_cut) snps_list <- lapply(snps_list, function(df) {df[df$p < 0.05, ]})
+  
+  
+  
+  if (FALSE) { # TODO FIX THIS 
+    # set up genes to plot
+    genes_to_plot <- data.frame(
+      Chromosome = c("chr9",    "chr21",  "chr1",   "chr16",  "chr17",  "chr6",    "chr19"),
+      chromStart = c(27546546,  31659693, 11012654, 31180139, 45784320, 31111223,  797452),
+      chromEnd   = c(27573481,  31668931, 11025492, 31191605, 45835828, 31112575,  812312),
+      Gene       = c("C9orf72", "SOD1",   "TARDBP", "FUS",    "CRHR1",  "C6orf15", "PTBP1")
+      #              All        All       All       All       m6A LOF   m6A GOF    m5C LOF
+    )
+  }
+  
+  
   
   # set up rcircos
   pdf(here("outputs", "rcircos_plot.pdf"), width = 7, height = 7)
@@ -125,7 +91,7 @@ main <- function() {
   cyto <- UCSC.HG38.Human.CytoBandIdeogram
   RCircos.Set.Core.Components(
     cyto.info = cyto, 
-    chr.exclude = c("chrX", "chrY"),
+    chr.exclude = c("chrX"), # show chrY so we can put freq labels above it
     tracks.inside = 0,
     tracks.outside = 4
   )
@@ -133,6 +99,7 @@ main <- function() {
   # reset plot params
   params <- RCircos.Get.Plot.Parameters()
   params$chr.ideo.pos <- 0.7          # shrink ideogram
+  params$hist.width <- 20             # change bar width
   params$track.out.start <- 0.9       # shrink hists around ideogram
   params$track.background <- "white"  # transparent hist bgs
   params$grid.line.color <- "white"   # transparent hist bgs
@@ -149,14 +116,19 @@ main <- function() {
   text(0, -0.10, "(Bin = 1 MB)", cex = 0.6, font = 1)
   
   bin_size <- 1e6
-  track_idxs <- setNames(seq(from = 4, to = 1), new_class_types)
+  track_idxs <- setNames(seq(from = 1, to = 4), mutation_cats)
   
   # named list of hist colors
-  cat_colors <- c("red", "blue", "darkgreen", "black")
-  hist_colors <- setNames(as.list(cat_colors), new_class_types)
+  col_vec <- c(
+    "purple", 
+    "red", 
+    "darkgreen", 
+    "blue"
+    )
+  hist_colors <- setNames(as.list(col_vec), mutation_cats)
   
-  for (class in new_class_types) {
-    current_mat <- data_dfs_store[[class]]
+  for (cat in mutation_cats) {
+    current_mat <- snps_list[[cat]]
     
     # bin data
     snp_data <- data.frame(
@@ -198,22 +170,42 @@ main <- function() {
       dplyr::select(-chr_start, -chr_end) # need to specify dplyr
     
     # set color
-    binned_counts_trimmed$PlotColor <- hist_colors[[class]]
+    binned_counts_trimmed$PlotColor <- hist_colors[[cat]]
     
     # plot data
     RCircos.Histogram.Plot.Custom(
       hist.data = binned_counts_trimmed,
       data.col = 4,
-      track.num = track_idxs[[class]],
+      track.num = track_idxs[[cat]],
       side = "out"
     )
+
   }
+  
+  
+  
+  if (FALSE) { # TODO fix
+    # plot genes
+    RCircos.Gene.Name.Plot(
+      gene.data = genes_to_plot, 
+      name.col = 4, 
+      track.num = 1,    
+      side = "in"
+    )
+  }
+  
+  
   
   # add legend for mutation categories
   legend(
     "bottomleft", 
-    legend = new_class_types,
-    fill = cat_colors,
+    legend = c(
+      "Other SNPs", 
+      "m6A LOF SNPs", 
+      "m6A GOF SNPs", 
+      "m5C LOF SNPs"
+      ),
+    fill = col_vec,
     border = NA,
     bty = "n",
     cex = 0.8
