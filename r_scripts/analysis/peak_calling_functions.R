@@ -6,76 +6,62 @@
 # Function to call peaks of one distribution relative to another w/ bootstrapping
 # Assumes pop and obs each have columns "count" and "bin_start"
 
-bin_data_reg <- function(df, binwidth, chr, class, type) {
-  snp_data <- data.frame(
-    bp = df$bp
-  )
-    
-  total_snps <- nrow(snp_data)
-  
-  snp_data$bin_start <- as.integer(floor(snp_data$bp / binwidth) * binwidth)
-  snp_data$bin_end <- as.integer(snp_data$bin_start + binwidth)
-  
-  binned_data <- snp_data %>%
-    group_by(bin_start, bin_end) %>%
-    summarise(count = n(), .groups = "drop") %>%
-    mutate(
-      chr = chr, 
-      rel_freq = count / total_snps,
-      bin_mid = bin_start + binwidth / 2, 
-      mut_class = class, 
-      data_type = type
-    )
-  
-  return(binned_data)
-}
 
-
-bin_data_gene <- function(df, ranges, chr, class, type) {
-  
-  # restrict gene ranges to this chromosome
+bin_data_gene <- function(df, ranges, chr, class, type, chunk_size = 1e5) {
   gene_chr <- ranges[seqnames(ranges) == paste0("chr", chr), ]
-  
-  # sort genes to define igen regions
   gene_chr <- sort(gene_chr)
-  
-  # get intergenic as the complement of gene ranges
   igen <- gaps(gene_chr)
-  
-  # remove seqnames and empty ranges outside the chromosome
   igen <- igen[strand(igen) == "*" & width(igen) > 0]
-  
-  # label them
   igen$gene_id <- paste0("igen_", seq_along(igen))
   igen$gene_name <- "igen"
-  
-  # build gr from df
-  snp_gr <- GRanges(
-    seqnames = paste0("chr", chr),
-    ranges = IRanges(start = df$bp, end = df$bp)
-  )
-  
-  # combine genes + igen
   bins <- c(gene_chr, igen)
   
-  # overlap snps with bins
-  hits <- findOverlaps(snp_gr, bins)
-  
-  # assign SNPs to bins
-  snp_bin <- tibble(
-    bp = start(snp_gr)[queryHits(hits)],
-    gene_id = bins$gene_id[subjectHits(hits)],
-    gene_name = bins$gene_name[subjectHits(hits)]
-  )
-  
-  # count SNPs per bin
   total_snps <- nrow(df)
-  binned_data <- snp_bin %>%
+  message("Total SNPs: ", total_snps)
+  
+  # Split SNPs into chunks
+  snp_chunks <- split(df, ceiling(seq_len(nrow(df)) / chunk_size))
+  message("Processing ", length(snp_chunks), " chunks...")
+  
+  binned_list <- vector("list", length(snp_chunks))
+  
+  for (i in seq_along(snp_chunks)) {
+    message("Chunk ", i, "/", length(snp_chunks))
+    
+    snp_df <- snp_chunks[[i]]
+    snp_gr <- GRanges(
+      seqnames = paste0("chr", chr),
+      ranges = IRanges(start = snp_df$bp, end = snp_df$bp)
+    )
+    
+    hits <- findOverlaps(snp_gr, bins)
+    
+    if (length(hits) == 0L) next
+    
+    snp_bin <- tibble(
+      bp = start(snp_gr)[queryHits(hits)],
+      gene_id = bins$gene_id[subjectHits(hits)],
+      gene_name = bins$gene_name[subjectHits(hits)]
+    )
+    
+    binned_chunk <- snp_bin %>%
+      group_by(gene_id, gene_name) %>%
+      summarise(
+        count = n(),
+        bin_start = min(bp),
+        bin_end = max(bp),
+        .groups = "drop"
+      )
+    
+    binned_list[[i]] <- binned_chunk
+  }
+  
+  binned_data <- bind_rows(binned_list) %>%
     group_by(gene_id, gene_name) %>%
     summarise(
-      count = n(),
-      bin_start = min(bp),
-      bin_end = max(bp),
+      count = sum(count),
+      bin_start = min(bin_start),
+      bin_end = max(bin_end),
       .groups = "drop"
     ) %>%
     mutate(
@@ -90,7 +76,8 @@ bin_data_gene <- function(df, ranges, chr, class, type) {
 }
 
 
-call_relative_peaks <- function(pop, obs, nboots, p_cutoff, chr) {
+
+call_relative_peaks <- function(pop, obs, nboots, chr) {
   
   # set up data to sample from
   sample_size <- sum(obs$count)
@@ -105,6 +92,12 @@ call_relative_peaks <- function(pop, obs, nboots, p_cutoff, chr) {
     mutate(rel_freq = count / sum(count))
   
   bin_idxs_to_boot <- rep(bin_starts, bin_freqs)
+  
+  # force counts to same bins
+  all_bins <- union(pop$bin_start, obs$bin_start)
+  pop <- pop %>% complete(bin_start = all_bins, fill = list(count = 0))
+  obs <- obs %>% complete(bin_start = all_bins, fill = list(count = 0))
+  
   
   # initialize output storage
   booted_mat <- matrix(0, nrow = nboots, ncol = length(bin_starts))
@@ -141,21 +134,20 @@ call_relative_peaks <- function(pop, obs, nboots, p_cutoff, chr) {
   
   # adjust pvals for multiple comparisons
   adj_pvals <- p.adjust(pvals, method = "BH")
-  
-  significant_pvals <- adj_pvals[adj_pvals <= p_cutoff]
+  significant_pvals <- adj_pvals
   
   # check for no significant peaks
   if (length(significant_pvals) == 0) {
     message("No significant peaks found. Returning empty data table")
     
     empty_dt <- data.table(
-      bin_start	= numeric(), 
+      bin_start  = numeric(), 
       bin_end = numeric(), 
       count = integer(), 
-      chr	= integer(), 
-      rel_freq = numeric(),	
-      bin_mid	= integer(), 
-      mut_class	= character(), 
+      chr  = integer(), 
+      rel_freq = numeric(),  
+      bin_mid  = integer(), 
+      mut_class  = character(), 
       pval = numeric(), 
       pop_rel_freq = numeric(), 
       relfreq_pct_diff = numeric(), 
@@ -167,16 +159,14 @@ call_relative_peaks <- function(pop, obs, nboots, p_cutoff, chr) {
   
   sig_bin_names <- names(significant_pvals)
   
+  # Aggregate pop by bin_start to avoid many-to-many joins
+  pop_summary <- as.data.table(pop)[, .(pop_rel_freq = mean(rel_freq)), by = bin_start]
+  
   # filter obs and append pval + relative frequency
   peak_regions <- obs %>%
     filter(bin_start %in% as.numeric(sig_bin_names)) %>%
-    mutate(
-      pval = significant_pvals[as.character(bin_start)]
-    ) %>%
-    left_join(
-      as.data.table(pop)[, .(bin_start, pop_rel_freq = rel_freq)],
-      by = "bin_start"
-    ) %>%
+    mutate(pval = significant_pvals[as.character(bin_start)]) %>%
+    left_join(pop_summary, by = "bin_start") %>%
     mutate(
       relfreq_pct_diff = ifelse(pop_rel_freq == 0, NA_real_,
                                 ((rel_freq - pop_rel_freq) / pop_rel_freq) * 100)

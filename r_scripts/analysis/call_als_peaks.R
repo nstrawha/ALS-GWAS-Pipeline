@@ -16,9 +16,7 @@ rm(list = ls())
 suppressPackageStartupMessages(library(data.table))
 suppressPackageStartupMessages(library(here))
 suppressPackageStartupMessages(library(tidyverse))
-suppressPackageStartupMessages(library(GenomicFeatures))
 suppressPackageStartupMessages(library(GenomicRanges))
-suppressPackageStartupMessages(library(rtracklayer))
 suppressPackageStartupMessages(library(Biostrings))
 suppressPackageStartupMessages(library(BSgenome.Hsapiens.UCSC.hg38))
 source(here("r_scripts", "analysis", "peak_calling_functions.R"))
@@ -68,7 +66,7 @@ main <- function() {
   )
   
   # file locations
-  als_floc <- here("summary_statistics_categorized")
+  als_floc <- here("summary_statistics_tmic_ps")
   vcf_loc <- here("original_data", "freq.vcf.gz")
   
   # get gtf for gene ranges
@@ -80,7 +78,7 @@ main <- function() {
   gtf$gene_id <- lapply(info_cols, "[[", 1)
   
   # collapse gtf to the gene level using exons
-  genes <- gtf[gtf$func == "exon"]
+  genes <- gtf[gtf$func == "transcript"]
   gene_ranges <- genes %>%
     as.data.frame() %>%
     group_by(gene_id) %>%
@@ -94,8 +92,7 @@ main <- function() {
   
   # bootstrapping params
   bin_size <- 1e5
-  num_bootstraps <- 10000
-  pval_cutoff <- 0.05
+  num_bootstraps <- 1000
   
   # helper function to get GRanges from peaks bed file
   get_peaks <- function(type) {
@@ -122,9 +119,6 @@ main <- function() {
     return(data_df)
   }
   
-  # initialize storage of binned data for later writing
-  all_binned_data_reg <- list()
-  
   for (chrom_idx in 22:num_chromosomes) {
     
     # gather control data for the chr
@@ -150,50 +144,16 @@ main <- function() {
     # get categorized als data
     als_data <- fread(file = here(
       als_floc, 
-      paste0("als.sumstats.lmm.chr", chrom_idx, ".categorized.csv"))
+      paste0("als.sumstats.lmm.chr", chrom_idx, ".tmic.ps.csv"))
       )
     
     # deduplicate als data (artifact of double-counting exons and cds, utr, etc)
     als_data <- als_data[!duplicated(als_data$snp), ]
     
-    # get m6a and m5c lof snps
-    als_data_gr <- GRanges(
-      seqnames = paste0("chr", chrom_idx),
-      ranges = IRanges(start = als_data$bp, end = als_data$bp)
-      )
-    
-    als_m6a_lof_data <- get_class_snps(
-      data_df = als_data, 
-      data_gr = als_data_gr, 
-      peaks_gr = m6a_peaks_gr, 
-      allele = "A"
-      )
-    
-    als_m5c_lof_data <- get_class_snps(
-      data_df = als_data, 
-      data_gr = als_data_gr, 
-      peaks_gr = m5c_peaks_gr, 
-      allele = "C"
-      )
-    
-    # get m6a gof snps
-    chr_name <- paste0("chr", chrom_idx)
-    chr_length <- seqlengths(genome_ref)[chr_name]
-    valid_idx <- which(als_data$bp >= 1 & als_data$bp <= chr_length)
-    als_data_for_gof <- als_data[valid_idx, ]
-    
-    # create granges obj
-    gof_data_gr <- GRanges(
-      seqnames = chr_name, 
-      ranges = IRanges(start = als_data_for_gof$bp - 2, end = als_data_for_gof$bp + 2)
-    )
-    
-    # find context for all SNPs
-    als_context_vec <- as.character(getSeq(genome_ref, gof_data_gr))
-    
-    als_m6a_gof_locs <- grepl("^[AGT][AG][TGC][C][ACT]$", as.character(als_context_vec)) # match to DR-CH motif
-    als_m6a_gof_locs <- (als_m6a_gof_locs & (als_data_for_gof$a2 == "A"))
-    als_m6a_gof_data <- als_data_for_gof[als_m6a_gof_locs, ]
+    # get snp categories
+    als_m6a_lof_data <- als_data[als_data$mut_cat == "m6a_lof", ]
+    als_m6a_gof_data <- als_data[als_data$mut_cat == "m6a_gof", ]
+    als_m5c_lof_data <- als_data[als_data$mut_cat == "m5c_lof", ]
     
     # do the same for all control data
     control_data_gr <- GRanges(
@@ -201,6 +161,7 @@ main <- function() {
       ranges = IRanges(start = control_data$bp, end = control_data$bp)
     )
     
+    # m6a lof
     control_m6a_lof_data <- get_class_snps(
       data_df = control_data, 
       data_gr = control_data_gr, 
@@ -208,6 +169,7 @@ main <- function() {
       allele = "A"
     )
     
+    # m5c lof
     control_m5c_lof_data <- get_class_snps(
       data_df = control_data, 
       data_gr = control_data_gr, 
@@ -215,7 +177,10 @@ main <- function() {
       allele = "C"
     )
 
-    # get m6a gof snps
+    # m6a gof
+    chr_name <- paste0("chr", chrom_idx)
+    chr_length <- seqlengths(genome_ref)[chr_name]
+    
     valid_idx <- which(control_data$bp >= 1 & control_data$bp <= chr_length)
     control_data_for_gof <- control_data[valid_idx, ]
     
@@ -231,17 +196,30 @@ main <- function() {
     control_m6a_gof_locs <- (control_m6a_gof_locs & (control_data_for_gof$a2 == "A"))
     control_m6a_gof_data <- control_data_for_gof[control_m6a_gof_locs, ]
     
-    rm(als_data_gr, gof_data_gr, control_data_gr, control_gof_data_gr); # clean to reduce overhead
+    rm(control_data_gr, control_gof_data_gr); # clean to reduce overhead
+    
+    all_control_bps <- c(
+      control_m6a_lof_data$bp,
+      control_m5c_lof_data$bp,
+      control_m6a_gof_data$bp
+    )
+    
+    als_other_data <- als_data[als_data$mut_cat == "other", ]
+    control_other_data <- control_data[!(control_data$bp %in% all_control_bps), ]
     
     # we now have:
-    # als_data
+    # als_other_data
     # als_m6a_lof_data
     # als_m5c_lof_data
     # als_m6a_gof_data
-    # control_data
+    # control_other_data
     # control_m6a_lof_data
     # control_m5c_lof_data
     # control_m6a_gof_data
+    
+    # clean to reduce overhead
+    rm(als_data)
+    rm(control_data)
   
     # package into named list
     output_classes <- c(
@@ -254,7 +232,7 @@ main <- function() {
     data_classes <- c("als", "control")
     
     data_to_analyze <- lapply(list(
-      list(als_data, control_data), 
+      list(als_other_data, control_other_data), 
       list(als_m6a_lof_data, control_m6a_lof_data), 
       list(als_m5c_lof_data, control_m5c_lof_data), 
       list(als_m6a_gof_data, control_m6a_gof_data)
@@ -267,45 +245,32 @@ main <- function() {
     
     # Binning data --------------------------------------------------------
     
-    # bin data into histograms
+    # bin dat by gene
     bin_types <- c("als", "control")
-    binned_data_reg <- list()
     binned_data_gene <- list()
     
     for (list_idx in 1:length(data_to_analyze)) {
-      current_list_reg <- data_to_analyze[[list_idx]]
-      current_list_gene <- list()
       
+      current_list_gene <- data_to_analyze[[list_idx]]
       current_class <- output_classes[[list_idx]]
      
       for (type_idx in 1:length(bin_types)) {
-        current_df <- current_list_reg[[type_idx]]
+        
+        current_df <- current_list_gene[[type_idx]]
         current_type <- bin_types[[type_idx]]
         
-        message("binning for ", bin_types[[type_idx]], ", data type ", data_classes[[list_idx]])
-        
-        current_bins_reg <- bin_data_reg(
-          df = current_df, 
-          binwidth = bin_size, 
-          chr = chrom_idx, 
-          class = output_classes[list_idx], 
-          type = current_type
-        )
+        message("Binning for ", current_type, ", class ", current_class)
         
         current_bins_gene <- bin_data_gene(
           df = current_df, 
           ranges = gene_ranges, 
           chr = chrom_idx, 
-          class = output_classes[list_idx], 
+          class = output_classes[[list_idx]], 
           type = current_type
         )
         
-        current_list_reg[[type_idx]]<- current_bins_reg
         current_list_gene[[type_idx]]<- current_bins_gene
       }
-      
-      binned_data_reg[[list_idx]] <- current_list_reg
-      names(binned_data_reg[[list_idx]]) <- bin_types
       
       binned_data_gene[[list_idx]] <- current_list_gene
       names(binned_data_gene[[list_idx]]) <- bin_types
@@ -318,85 +283,40 @@ main <- function() {
     
     # Bootstrapping analysis ----------------------------------------------
 
-    # bootstrap and write reg bin data
-    names(binned_data_reg) <- output_classes
+    # bootstrap and write
     names(binned_data_gene) <- output_classes
-    binned_data_list <- list(binned_data_reg, binned_data_gene)
     
-    for (bin_type in 1:length(binned_data_list)) {
-      binned_data <- binned_data_list[[bin_type]]
+    for (class in output_classes) {
       
-      for (class in output_classes) {
-        
-        # unpack als and control data
-        current_dfs <- binned_data[[class]]
-        
-        current_dfs <- lapply(current_dfs, function(df) {
-          df$data_type <- NULL
-          df
-        })
-        
-        als_bins <- current_dfs[["als"]]
-        control_bins <- current_dfs[["control"]]
-        
-        # carry out bootstrap analysis
-        significant_peaks <- call_relative_peaks(
-          pop = control_bins, 
-          obs = als_bins, 
-          nboots = num_bootstraps, 
-          p_cutoff = pval_cutoff, 
-          chr = chrom_idx
-        )
-        
-        significant_peaks <- data.table(significant_peaks)
-        
-        if (nrow(significant_peaks) > 0) {
-          
-          # add confidence level tags to bins based on p-value
-          significant_peaks[, conf_lvl := fifelse(pval <= 5e-8, "5e-8",
-                                                  fifelse(pval <= 1e-5, "1e-5",
-                                                          fifelse(pval <= 1e-3, "1e-3",
-                                                                  fifelse(pval <= 0.05, "0.05", ">0.05"))))]
-        }
-        
-        sig_rate <- (nrow(significant_peaks) / nrow(control_bins)) * 100
-        message("Significance rate for chr", chrom_idx, ", ", class, ": ", sig_rate, " %")
-        
-        # write results
-        output_floc <- here("significant_bins", class)
-        dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
-        
-        if (bin_type == 1) fname <- paste0("reg_significant_peaks_chr", chrom_idx, ".csv")
-        else fname <- paste0("gene_significant_peaks_chr", chrom_idx, ".csv")
-        
-        dir.create(
-          output_floc, 
-          recursive = TRUE, 
-          showWarnings = FALSE
-        )
-        
-        fwrite(
-          significant_peaks, 
-          file = here(
-            output_floc, 
-            fname
-          ),
-          col.names = TRUE, 
-          quote = FALSE
-        )
-      }
+      # unpack als and control data
+      current_dfs <- binned_data_gene[[class]]
       
-      # un-nest binned data for writing
-      binned_data <- lapply(binned_data, function(list) {rbindlist(list)})
-      binned_data <- rbindlist(binned_data)
+      current_dfs <- lapply(current_dfs, function(df) {
+        df$data_type <- NULL
+        df
+      })
       
-      output_floc <- here("binned_data")
+      als_bins <- current_dfs[["als"]]
+      control_bins <- current_dfs[["control"]]
+      
+      # carry out bootstrap analysis
+      significant_peaks <- call_relative_peaks(
+        pop = control_bins, 
+        obs = als_bins, 
+        nboots = num_bootstraps,
+        chr = chrom_idx
+      )
+      
+      significant_peaks <- data.table(significant_peaks)
+      
+      sig_rate <- (nrow(significant_peaks) / nrow(control_bins)) * 100
+      message("Significance rate for chr", chrom_idx, ", ", class, ": ", sig_rate, " %")
+      
+      # write results
+      output_floc <- here("bin_ps", class)
       dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
       
-      if (bin_type == 1) fname <- paste0("reg_binned_counts_chr", chrom_idx, ".csv")
-      else fname <- paste0("gene_binned_counts_chr", chrom_idx, ".csv")
-      
-      output_floc <- "binned_data"
+      fname <- paste0("bin_ps_chr", chrom_idx, ".csv")
       
       dir.create(
         output_floc, 
@@ -405,15 +325,42 @@ main <- function() {
       )
       
       fwrite(
-        binned_data, 
-        file = here(output_floc, fname), 
-        sep = "\t", 
-        quote = FALSE, 
-        col.names = TRUE
+        significant_peaks, 
+        file = here(
+          output_floc, 
+          fname
+        ),
+        col.names = TRUE, 
+        quote = FALSE
       )
-      
-      rm(binned_data) # clean to reduce overhead
     }
+    
+    # un-nest binned data for writing
+    binned_data <- lapply(binned_data_gene, function(list) {rbindlist(list)})
+    binned_data <- rbindlist(binned_data)
+    
+    output_floc <- here("binned_data")
+    dir.create(output_floc, recursive = TRUE, showWarnings = FALSE)
+    
+    fname <- paste0("binned_counts_chr", chrom_idx, ".csv")
+    
+    output_floc <- "binned_data"
+    
+    dir.create(
+      output_floc, 
+      recursive = TRUE, 
+      showWarnings = FALSE
+    )
+    
+    fwrite(
+      binned_data, 
+      file = here(output_floc, fname), 
+      sep = "\t", 
+      quote = FALSE, 
+      col.names = TRUE
+    )
+    
+    rm(binned_data, binned_data_gene) # clean to reduce overhead
   }
   
   invisible(NULL)

@@ -66,20 +66,17 @@ main <- function() {
   # perform pval cut
   if (pval_cut) snps_list <- lapply(snps_list, function(df) {df[df$p < 0.05, ]})
   
+  # set up genes to plot
+  genes_to_plot <- data.frame(
+    Chromosome = c("chr9",    "chr21",  "chr1",   "chr16",  "chr17",  "chr6",    "chr19"),
+    chromStart = c(27546546,  31659693, 11012654, 31180139, 45784320, 31111223,  797452),
+    chromEnd   = c(27573481,  31668931, 11025492, 31191605, 45835828, 31112575,  812312),
+    Gene       = c("C9orf72", "SOD1",   "TARDBP", "FUS",    "CRHR1",  "C6orf15", "PTBP1")
+    #              All        All       All       All       m6A LOF   m6A GOF    m5C LOF
+  )
   
-  
-  if (FALSE) { # TODO FIX THIS 
-    # set up genes to plot
-    genes_to_plot <- data.frame(
-      Chromosome = c("chr9",    "chr21",  "chr1",   "chr16",  "chr17",  "chr6",    "chr19"),
-      chromStart = c(27546546,  31659693, 11012654, 31180139, 45784320, 31111223,  797452),
-      chromEnd   = c(27573481,  31668931, 11025492, 31191605, 45835828, 31112575,  812312),
-      Gene       = c("C9orf72", "SOD1",   "TARDBP", "FUS",    "CRHR1",  "C6orf15", "PTBP1")
-      #              All        All       All       All       m6A LOF   m6A GOF    m5C LOF
-    )
-  }
-  
-  
+
+  # Setting up RCircos ----------------------------------------------------
   
   # set up rcircos
   pdf(here("outputs", "rcircos_plot.pdf"), width = 7, height = 7)
@@ -110,6 +107,21 @@ main <- function() {
   ideo <- RCircos.Get.Plot.Ideogram()
   
   RCircos.Set.Plot.Area()
+  
+  # plot genes
+  RCircos.Gene.Name.Plot(
+    gene.data = genes_to_plot, 
+    name.col = 4, 
+    track.num = 1,    
+    side = "in"
+  )
+  
+  RCircos.Gene.Connector.Plot.Custom(
+    genomic.data = genes_to_plot, 
+    track.num = 1,
+    side = "out"
+  )
+  
   RCircos.Chromosome.Ideogram.Plot.Custom()
   
   text(0, 0.05, "ALS SNP Distribution", cex = 0.8, font = 2)
@@ -126,6 +138,13 @@ main <- function() {
     "blue"
     )
   hist_colors <- setNames(as.list(col_vec), mutation_cats)
+  
+  message("Ideogram generated")
+
+  
+# Plot the data -----------------------------------------------------------
+  
+  max_counts <- list()
   
   for (cat in mutation_cats) {
     current_mat <- snps_list[[cat]]
@@ -179,22 +198,11 @@ main <- function() {
       track.num = track_idxs[[cat]],
       side = "out"
     )
+    
+    # record the max bin counts
+    max_counts[[cat]] <- max(binned_counts_trimmed$Data)
 
   }
-  
-  
-  
-  if (FALSE) { # TODO fix
-    # plot genes
-    RCircos.Gene.Name.Plot(
-      gene.data = genes_to_plot, 
-      name.col = 4, 
-      track.num = 1,    
-      side = "in"
-    )
-  }
-  
-  
   
   # add legend for mutation categories
   legend(
@@ -211,7 +219,61 @@ main <- function() {
     cex = 0.8
   )
   
+
+# Frequency axis label ----------------------------------------------------
+
+  # long vertical bar
+  vbar_height = length(mutation_cats) * 0.371 - 0.046
+  
+  segments(
+    x0 = -0.025, y0 = 0.9, 
+    x1 = -0.025, y1 = 0.9 + vbar_height, 
+    col = "black", lwd = 1
+    )
+  
+  # ticks
+  for (idx in 1:length(mutation_cats)) {
+    segments(
+      x0 = -0.025, y0 = 0.9 + 0.371 * (idx - 1), 
+      x1 = -0.050, y1 = 0.9 + 0.371 * (idx - 1), 
+      col = "black", lwd = 1
+    )
+    
+    segments(
+      x0 = -0.025, y0 = 1.225 + 0.371 * (idx - 1), 
+      x1 = -0.050, y1 = 1.225 + 0.371 * (idx - 1), 
+      col = "black", lwd = 1
+    )
+  }
+  
+  # freq labels
+  for (idx in 1:length(mutation_cats)) {
+    text(
+      x = 0, y = 0.9 + 0.371 * (idx - 1),
+      labels = "0", 
+      cex = 0.30, 
+      pos = 2
+    )
+    
+    text(
+      x = 0, y = 1.225 + 0.371 * (idx - 1),
+      labels = max_counts[[idx]], 
+      cex = 0.30, 
+      pos = 2
+    )
+  }
+  
+  # "freq" label
+  text(
+    x = 0.065, y = 1 + length(mutation_cats) * 0.371 - 0.046, 
+    labels = "Frequency", 
+    cex = 0.60, 
+    pos = 2
+    )
+  
   dev.off()
+  
+  message("Plotting complete")
   
   invisible(NULL)
 }

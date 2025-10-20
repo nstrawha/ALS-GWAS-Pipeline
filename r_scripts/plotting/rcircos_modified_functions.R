@@ -124,8 +124,8 @@ RCircos.Draw.Chromosome.Ideogram.Custom <- function (ideo.pos = NULL, ideo.width
   innerPos <- ideo.pos
   chromosomes <- unique(RCircos.Cyto$Chromosome)
   
-  RCircos.Track.Outline(outerPos, innerPos, num.layers = 1, 
-                        chromosomes, track.colors = rep("white", length(chromosomes)))
+  RCircos.Track.Outline.Custom(outerPos, innerPos, num.layers = 1, 
+                        chromosomes, track.colors = rep(NA, length(chromosomes))) # clear not white
 }
 
 
@@ -195,5 +195,111 @@ RCircos.Histogram.Plot.Custom <- function (hist.data = NULL, data.col = 4,
     
     polygon(polygonX, polygonY, col = histColors[aPoint], 
             border = NA)
+  }
+}
+
+
+# Gene labels -------------------------------------------------------------
+
+# allows tick marks on chromosome box things or whatever
+RCircos.Gene.Connector.Plot.Custom <- function (genomic.data = NULL, track.num = NULL, side = "in", 
+          inside.pos = NULL, outside.pos = NULL, genomic.columns = 3, 
+          is.sorted = FALSE) 
+{
+  if (is.null(genomic.data)) 
+    stop("Genomic data missing for RCircos.Gene.Connector.Plot().\n")
+  boundary <- RCircos.Get.Plot.Boundary(track.num, side, inside.pos, 
+                                        outside.pos, erase.area = FALSE)
+  outerPos <- boundary[1] - 0.452  # MODIFICATION HERE
+  innerPos <- boundary[2] - 0.198  # MODIFICATION HERE
+  RCircos.Pos <- RCircos.Get.Plot.Positions()
+  RCircos.Par <- RCircos.Get.Plot.Parameters()
+  geneData <- RCircos.Get.Single.Point.Positions(genomic.data, 
+                                                 genomic.columns)
+  labelData <- RCircos.Get.Gene.Label.Locations(geneData, genomic.columns, 
+                                                is.sorted)
+  connectData <- data.frame(labelData$Location, labelData$LabelPosition)
+  if (outerPos < RCircos.Par$chr.ideo.pos) {
+    genomicCol <- ncol(connectData) - 1
+    labelCol <- ncol(connectData)
+  }
+  else {
+    genomicCol <- ncol(connectData)
+    labelCol <- ncol(connectData) - 1
+  }
+  vHeight <- round((outerPos - innerPos)/10, digits = 4)
+  hRange <- outerPos - innerPos - 2 * vHeight
+  topLoc <- outerPos - vHeight
+  botLoc <- innerPos + vHeight
+  lineColors <- RCircos.Get.Plot.Colors(labelData, RCircos.Par$text.color)
+  chroms <- unique(connectData[, 1])
+  for (aChr in seq_along(chroms)) {
+    chrRows <- which(connectData[, 1] == chroms[aChr])
+    total <- length(chrRows)
+    for (aPoint in seq_len(total)) {
+      p1 <- connectData[chrRows[aPoint], genomicCol]
+      p2 <- connectData[chrRows[aPoint], labelCol]
+      lines(c(RCircos.Pos[p1, 1] * outerPos, RCircos.Pos[p1, 
+                                                         1] * topLoc), c(RCircos.Pos[p1, 2] * outerPos, 
+                                                                         RCircos.Pos[p1, 2] * topLoc), col = "red") # lineColors[chrRows[aPoint]])
+      lines(c(RCircos.Pos[p2, 1] * botLoc, RCircos.Pos[p2, 
+                                                       1] * innerPos), c(RCircos.Pos[p2, 2] * botLoc, 
+                                                                         RCircos.Pos[p2, 2] * innerPos), col = "red") # lineColors[chrRows[aPoint]])
+      lines(c(RCircos.Pos[p1, 1] * topLoc, RCircos.Pos[p2, 
+                                                       1] * botLoc), c(RCircos.Pos[p1, 2] * topLoc, 
+                                                                       RCircos.Pos[p2, 2] * botLoc), col = "red") # lineColors[chrRows[aPoint]])
+    }
+  }
+}
+
+
+# Chromosome outline function ---------------------------------------------
+
+# get rid of chrY
+RCircos.Track.Outline.Custom <- function (inside.pos = NULL, outside.pos = NULL, num.layers = 1, 
+          chrom.list = NULL, track.colors = NULL) 
+{
+  if (is.null(outside.pos) || is.null(inside.pos)) 
+    stop("Missing outside.pos/inside.pos in RCircos.Track.Outline().\n")
+  RCircos.Cyto <- RCircos.Get.Plot.Ideogram()
+  RCircos.Pos <- RCircos.Get.Plot.Positions()
+  RCircos.Par <- RCircos.Get.Plot.Parameters()
+  subtrack.height <- (outside.pos - inside.pos)/num.layers
+  chromosomes <- unique(as.character(RCircos.Cyto$Chromosome))
+  if (!is.null(chrom.list)) {
+    if (sum(chrom.list %in% chromosomes) != length(chrom.list)) {
+      stop(paste("One or more chromosome is not", "in chromosome ideogram data.\n"))
+    }
+    chromosomes <- chrom.list
+  }
+  if (is.null(track.colors)) {
+    track.colors <- rep(RCircos.Par$track.background, length(chromosomes))
+  }
+  else {
+    if (length(track.colors) != length(chromosomes)) 
+      track.colors <- rep(track.colors, length(chromosomes))
+  }
+  for (aChr in seq_len(length(chromosomes))) {
+      if (!chromosomes[[aChr]] == "chrY") {
+      chr.rows <- which(RCircos.Cyto$Chromosome == chromosomes[aChr])
+      the.chr <- RCircos.Cyto[chr.rows, ]
+      plot.start <- min(RCircos.Cyto$StartPoint[chr.rows])
+      plot.end <- max(RCircos.Cyto$EndPoint[chr.rows])
+      polygon.x <- c(RCircos.Pos[plot.start:plot.end, 1] * 
+                       outside.pos, RCircos.Pos[plot.end:plot.start, 1] * 
+                       inside.pos)
+      polygon.y <- c(RCircos.Pos[plot.start:plot.end, 2] * 
+                       outside.pos, RCircos.Pos[plot.end:plot.start, 2] * 
+                       inside.pos)
+      polygon(polygon.x, polygon.y, col = track.colors[aChr])
+      if (num.layers > 1) {
+        for (a.line in seq_len(num.layers - 1)) {
+          height <- outside.pos - a.line * subtrack.height
+          lines(RCircos.Pos[plot.start:plot.end, 1] * height, 
+                RCircos.Pos[plot.start:plot.end, 2] * height, 
+                col = RCircos.Par$grid.line.color)
+        }
+      }
+    }
   }
 }

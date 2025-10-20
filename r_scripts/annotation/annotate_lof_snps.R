@@ -30,6 +30,7 @@ load_peaks <- function(path, prefix_to_add) {
 # function to categorize snps
 categorize_snps <- function(snp_gr, snp_df, peaks_gr, allele) {
   hits <- findOverlaps(snp_gr, peaks_gr, type = "within")
+  message(typeof(hits))
   candidates <- unique(snp_df[queryHits(hits), ])
   filter(candidates, a1 == allele)
 }

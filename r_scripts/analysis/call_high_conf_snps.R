@@ -42,11 +42,11 @@ main <- function() {
   
   for (chrom_idx in 1:num_chromosomes) {
     faddress <- here(
-      "summary_statistics_categorized", 
-      paste0("als.sumstats.lmm.chr", chrom_idx, ".categorized.csv")
+      "summary_statistics_tmic_ps", 
+      paste0("als.sumstats.lmm.chr", chrom_idx, ".tmic.ps.csv")
     )
     fdata <- fread(file = faddress)
-    all_snp_data[[chrom_idx]] <- snp_class_data
+    all_snp_data[[chrom_idx]] <- fdata
   }
   
   all_snp_data <- rbindlist(all_snp_data)
@@ -54,132 +54,55 @@ main <- function() {
   # deduplicate SNPs
   all_snp_data <- all_snp_data[!duplicated(all_snp_data$snp), ]
   
-  # construct named list of classes
-  snp_data_list <- list()
-  for (class in class_types) {
-    snp_data_list[[class]] <- all_snp_data[all_snp_data$mut_cat == class, ]
-  }
-  
   message("SNP data read")
   
-  # read significant bin data
-  bin_types <- c("") # TODO
+  # read bin data
+  all_bin_data <- list()
   
-  for (type in bin_types) {
+  for (class in class_types) {
+    class_sublist <- list()
     
-    all_bin_data <- list()
-    
-    for (class in class_types) {
-      bin_chromlist <- list()
-      for (chrom_idx in 1:num_chromosomes) {
-        faddress <- here(
-          "significant_bins", 
-          class, 
-          paste0(type, "significant_peaks_chr", chrom_idx, "_", class, ".csv")
+    for (chrom_idx in 1:num_chromosomes) {
+      fdata <- fread(
+        here("bin_ps", class, paste0("bin_ps_chr", chrom_idx, ".csv"))
         )
-        fdata <- fread(file = faddress)
-        bin_chromlist[[chrom_idx]] <- fdata
-      }
-      chrom_bins <- rbindlist(bin_chromlist)
-      all_bin_data[[class]] <- chrom_bins
+      class_sublist[[chrom_idx]] <- fdata
     }
     
-    message("Bin data read")
+    data_to_record <- rbindlist(class_sublist)
+    data_to_record <- data_to_record[grepl("gene_id", data_to_record$gene_id), ]
+    data_to_record$gene_id <- sub('.*gene_id \\"([^\\"]+)\\".*', '\\1', data_to_record$gene_id)
     
-    
-    # Call out SNPs -------------------------------------------------------
-    
-    # find snps within significant bins and generate genome-wide summaries
-    for (class in mutation_classes) {
-      current_class_snp_df <- all_snp_data[[class]]
-      current_class_bin_df <- all_bin_data[[class]]
-      
-      # initialize storage
-      genome_pheno_counts <- list()
-      genome_clinsig_counts <- list()
-      
-      sig_snps_list <- list()
-      
-      for (chrom_idx in 1:num_chromosomes) {
-        current_chr_snps <- current_class_snp_df[current_class_snp_df$chr == chrom_idx, ]
-        current_chr_bins <- current_class_bin_df[current_class_bin_df$chr == chrom_idx, ]
-        
-        current_snps_gr <- if (nrow(current_chr_snps) > 0) GRanges(
-          seqnames = paste0("chr", chrom_idx),
-          ranges = IRanges(start = current_chr_snps$bp, end = current_chr_snps$bp)
-        ) else GRanges()
-        
-        current_bins_gr <- if (nrow(current_chr_bins) > 0) GRanges(
-          seqnames = paste0("chr", chrom_idx),
-          ranges = IRanges(start = current_chr_bins$bin_start, end = current_chr_bins$bin_end)
-        ) else GRanges()
-        
-        hits <- findOverlaps(current_snps_gr, current_bins_gr, type = "within")
-        sig_snps <- current_chr_snps[queryHits(hits), ]
-        sig_snps <- current_chr_snps # TODO just this
-  
-        # filter for significant p-values
-        sig_snps <- sig_snps[sig_snps$p <= 0.05, ]
-        
-        # store snps for later writing
-        sig_snps_list[[chrom_idx]] <- sig_snps
-        
-        # store genome-wide counts
-        genome_pheno_counts[[chrom_idx]] <- sig_snps[, .N, by = phenotype_description]
-        genome_clinsig_counts[[chrom_idx]] <- sig_snps[, .N, by = clinical_significance]
-      }
-      
-      # aggregate all snps
-      all_sig_snps_df <- rbindlist(sig_snps_list)
-      
-      # aggregate genome-wide counts
-      genome_pheno_df <- rbindlist(genome_pheno_counts)[, .(count = sum(N)), by = phenotype_description][order(-count)]
-      genome_clinsig_df <- rbindlist(genome_clinsig_counts)[, .(count = sum(N)), by = clinical_significance][order(-count)]
-      
-      # filters
-      # all_sig_snps_df <- all_sig_snps_df[all_sig_snps_df$freq > 0.90, ]
-      
-      # write SNPs
-      output_faddress <- here(
-        "significant_snps", 
-        paste0("significant_snps_", class, ".csv")
-      )
-      
-      dir.create(here("significant_snps"), recursive = TRUE, showWarnings = FALSE)
-      
-      # sort by pval
-      all_sig_snps_df <- all_sig_snps_df %>% 
-        arrange(p)
-      
-      fwrite(
-        all_sig_snps_df, 
-        file = output_faddress, 
-        col.names = TRUE, 
-        quote = TRUE
-      )
-      
-      # write gene p-values
-      dir.create(here("significant_snps", "genes_summary"), recursive = TRUE, showWarnings = FALSE)
-      
-      gene_pvals <- all_sig_snps_df %>%
-        group_by(ensembl_gene_id) %>%
-        summarise(
-          min_p = min(p, na.rm = TRUE),
-          snp_count = n()
-        ) %>%
-        arrange(min_p)
-      
-      # write to file
-      fwrite(
-        gene_pvals,
-        file = here("significant_snps", "genes_summary", paste0("gene_pvals_", class, ".csv")),
-        col.names = TRUE,
-        quote = FALSE
-      )
-    }
+    all_bin_data[[class]] <- data_to_record
   }
   
-  message("Data written and genome-wide summaries generated")
+  all_bin_data <- rbindlist(all_bin_data)
+  gene_data_to_merge <- all_bin_data[!duplicated(all_bin_data$gene_id) & all_bin_data$gene_id != "none", ]
+  gene_data_to_merge <- data.frame(
+    ensembl_gene_id = gene_data_to_merge$gene_id, 
+    gene_p = gene_data_to_merge$pval
+  )
+  
+  message("Bin data read")
+  
+  
+  # Call out SNPs -------------------------------------------------------
+  
+  merged_data <- merge(all_snp_data, gene_data_to_merge, all.x = TRUE, by = "ensembl_gene_id")
+  merged_data$gene_p[is.na(merged_data$gene_p)] <- "none"
+  
+  # write output
+  for (class in class_types) {
+    data_to_write <- merged_data[merged_data$mut_cat == class, ]
+    fwrite(
+      data_to_write, 
+      file = here("outputs", paste0("result_snps_", class, ".csv")), 
+      col.names = TRUE,
+      quote = TRUE
+    )
+  }
+  
+  message("Data written")
   
   invisible(NULL)
 }
