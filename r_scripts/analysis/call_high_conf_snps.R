@@ -40,7 +40,7 @@ main <- function() {
   # read snp data
   all_snp_data <- list()
   
-  for (chrom_idx in 1:num_chromosomes) {
+  for (chrom_idx in 22:num_chromosomes) {
     faddress <- here(
       "summary_statistics_tmic_ps", 
       paste0("als.sumstats.lmm.chr", chrom_idx, ".tmic.ps.csv")
@@ -62,7 +62,7 @@ main <- function() {
   for (class in class_types) {
     class_sublist <- list()
     
-    for (chrom_idx in 1:num_chromosomes) {
+    for (chrom_idx in 22:num_chromosomes) {
       fdata <- fread(
         here("bin_ps", class, paste0("bin_ps_chr", chrom_idx, ".csv"))
         )
@@ -80,7 +80,7 @@ main <- function() {
   gene_data_to_merge <- all_bin_data[!duplicated(all_bin_data$gene_id) & all_bin_data$gene_id != "none", ]
   gene_data_to_merge <- data.frame(
     ensembl_gene_id = gene_data_to_merge$gene_id, 
-    gene_p = gene_data_to_merge$pval
+    gene_p = gene_data_to_merge$gene_p
   )
   
   message("Bin data read")

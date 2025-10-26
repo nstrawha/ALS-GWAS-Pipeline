@@ -73,16 +73,21 @@ main <- function() {
   gtf <- fread(here("original_data", "hg38.ensGene.gtf"))
   colnames(gtf) <- c("seqnames", "source", "func", "start", "end", "str1", "str2", "str3", "gene_info")
   
+  # remove gtf strandedness because ???
+  gtf$str1 <- NULL
+  gtf$str2 <- NULL
+  gtf$str3 <- NULL
+  
   # split gene info col
   info_cols <- strsplit(gtf$gene_info, ";")
   gtf$gene_id <- lapply(info_cols, "[[", 1)
   
-  # collapse gtf to the gene level using exons
+  # collapse gtf to the gene level
   genes <- gtf[gtf$func == "transcript"]
   gene_ranges <- genes %>%
-    as.data.frame() %>%
     group_by(gene_id) %>%
     summarise(start = min(start), end = max(end), seqnames = seqnames) %>%
+    distinct() %>% 
     makeGRangesFromDataFrame(keep.extra.columns = TRUE)
   
   # clean to reduce overhead
@@ -245,7 +250,7 @@ main <- function() {
     
     # Binning data --------------------------------------------------------
     
-    # bin dat by gene
+    # bin data by gene
     bin_types <- c("als", "control")
     binned_data_gene <- list()
     
@@ -355,7 +360,6 @@ main <- function() {
     fwrite(
       binned_data, 
       file = here(output_floc, fname), 
-      sep = "\t", 
       quote = FALSE, 
       col.names = TRUE
     )

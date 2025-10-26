@@ -10,7 +10,7 @@
 bin_data_gene <- function(df, ranges, chr, class, type, chunk_size = 1e5) {
   gene_chr <- ranges[seqnames(ranges) == paste0("chr", chr), ]
   gene_chr <- sort(gene_chr)
-  igen <- gaps(gene_chr)
+  igen <- gaps(reduce(gene_chr, ignore.strand = TRUE))
   igen <- igen[strand(igen) == "*" & width(igen) > 0]
   igen$gene_id <- paste0("igen_", seq_along(igen))
   igen$gene_name <- "igen"
@@ -35,6 +35,8 @@ bin_data_gene <- function(df, ranges, chr, class, type, chunk_size = 1e5) {
     )
     
     hits <- findOverlaps(snp_gr, bins)
+    message("n hits:", length(hits))
+    message(head(bins))
     
     if (length(hits) == 0L) next
     
@@ -67,7 +69,6 @@ bin_data_gene <- function(df, ranges, chr, class, type, chunk_size = 1e5) {
     mutate(
       chr = chr,
       rel_freq = count / total_snps,
-      bin_mid = (bin_start + bin_end) / 2,
       mut_class = class,
       data_type = type
     )
@@ -79,101 +80,70 @@ bin_data_gene <- function(df, ranges, chr, class, type, chunk_size = 1e5) {
 
 call_relative_peaks <- function(pop, obs, nboots, chr) {
   
-  # set up data to sample from
   sample_size <- sum(obs$count)
-  bin_starts <- pop$bin_start
-  bin_freqs <- pop$count
   
-  # set up relative frequencies
-  obs <- obs %>%
-    mutate(rel_freq = count / sum(count))
+  # make sure bin_start are numeric
+  pop$bin_start <- as.numeric(pop$bin_start)
+  obs$bin_start <- as.numeric(obs$bin_start)
   
-  pop <- pop %>%
-    mutate(rel_freq = count / sum(count))
+  num_pop_in_obs <- sum(pop$gene_id %in% obs$gene_id)
   
-  bin_idxs_to_boot <- rep(bin_starts, bin_freqs)
+  obs$gene_id <- unlist(obs$gene_id)
   
-  # force counts to same bins
-  all_bins <- union(pop$bin_start, obs$bin_start)
-  pop <- pop %>% complete(bin_start = all_bins, fill = list(count = 0))
-  obs <- obs %>% complete(bin_start = all_bins, fill = list(count = 0))
+  pop_to_merge <- data.frame(
+    gene_id = unlist(pop$gene_id),
+    count = pop$count,
+    rel_freq = pop$rel_freq
+  )
   
+  # materials for bootstrap
+  df_to_boot <- obs %>%
+    left_join(pop_to_merge, by = "gene_id", suffix = c(".als", ".ctrl"))
   
-  # initialize output storage
-  booted_mat <- matrix(0, nrow = nboots, ncol = length(bin_starts))
-  colnames(booted_mat) <- as.character(bin_starts)
+  sample_size <- sum(df_to_boot$count.als)
   
-  message("Bootstrap initialized")
+  boot_record <- data.frame(
+    below_count = rep.int(0, nrow(df_to_boot)), 
+    above_count = rep.int(0, nrow(df_to_boot))
+  )
   
-  # carry out sampling
-  for (sample in 1:nboots) {
+  # na check
+  df_to_boot$count.ctrl[is.na(df_to_boot$count.ctrl)] <- 0
+  
+  # perform bootstrap
+  for (sample_idx in 1:nboots) {
     
-    if (sample %% 100 == 0) message("Sample ", sample, "/", nboots, " for chr ", chr)
+    # update message
+    if (sample_idx %% 100 == 0) message("chr ", chr, ", sample ", sample_idx, "/", nboots)
     
-    boot_sample <- sample(bin_idxs_to_boot, size = sample_size, replace = TRUE)
-    idxs <- match(boot_sample, bin_starts)
-    counts <- tabulate(idxs, nbins = length(bin_starts))
+    # sample rows with replacement, weighted by control counts
+    boot_df <- df_to_boot[sample(seq_len(nrow(df_to_boot)),
+                                 size = sample_size,
+                                 replace = TRUE,
+                                 prob = df_to_boot$count.ctrl), ]
     
-    booted_mat[sample, ] <- counts
+    # aggregate sampled counts by gene_id
+    boot_summary <- boot_df %>%
+      count(gene_id, name = "boot_count")
+    
+    # join back to full df_to_boot to align rows
+    df_merged <- df_to_boot %>%
+      left_join(boot_summary, by = "gene_id") %>%
+      mutate(boot_count = replace_na(boot_count, 0))
+  
+    is_smaller <- df_merged$count.als <= df_merged$boot_count
+    is_bigger <- df_merged$count.als > df_merged$boot_count
+    
+    boot_record$below_count <- boot_record$below_count + is_smaller
+    boot_record$above_count <- boot_record$above_count + is_bigger
   }
   
-  # mean and sd of bootstrap counts per bin (columns)
-  boot_means <- colMeans(booted_mat)
-  boot_sds <- apply(booted_mat, 2, sd)
+  # calculate ps
+  pvals <- boot_record$above_count / (boot_record$below_count + boot_record$above_count)
+  pvals <- p.adjust(pvals, method = "BH")
   
-  message("Sampling complete. Conducting analysis")
-  
-  # obtain pvals for bins
-  obs_counts <- setNames(obs$count, obs$bin_start)
-  observed_bins <- as.character(obs$bin_start)
-  
-  pvals <- sapply(observed_bins, function(bin) {
-    i <- which(colnames(booted_mat) == bin)
-    mean(booted_mat[, i] >= obs_counts[bin])
-  })
-  
-  # adjust pvals for multiple comparisons
-  adj_pvals <- p.adjust(pvals, method = "BH")
-  significant_pvals <- adj_pvals
-  
-  # check for no significant peaks
-  if (length(significant_pvals) == 0) {
-    message("No significant peaks found. Returning empty data table")
-    
-    empty_dt <- data.table(
-      bin_start  = numeric(), 
-      bin_end = numeric(), 
-      count = integer(), 
-      chr  = integer(), 
-      rel_freq = numeric(),  
-      bin_mid  = integer(), 
-      mut_class  = character(), 
-      pval = numeric(), 
-      pop_rel_freq = numeric(), 
-      relfreq_pct_diff = numeric(), 
-      conf_lvl = numeric()
-    )
-    
-    return(empty_dt)
-  }
-  
-  sig_bin_names <- names(significant_pvals)
-  
-  # Aggregate pop by bin_start to avoid many-to-many joins
-  pop_summary <- as.data.table(pop)[, .(pop_rel_freq = mean(rel_freq)), by = bin_start]
-  
-  # filter obs and append pval + relative frequency
-  peak_regions <- obs %>%
-    filter(bin_start %in% as.numeric(sig_bin_names)) %>%
-    mutate(pval = significant_pvals[as.character(bin_start)]) %>%
-    left_join(pop_summary, by = "bin_start") %>%
-    mutate(
-      relfreq_pct_diff = ifelse(pop_rel_freq == 0, NA_real_,
-                                ((rel_freq - pop_rel_freq) / pop_rel_freq) * 100)
-    )
-  
-  peak_regions <- peak_regions %>% 
-    arrange(desc(relfreq_pct_diff))
+  df_to_boot$gene_p <- pvals
+  peak_regions <- df_to_boot
   
   return(peak_regions)
 }
